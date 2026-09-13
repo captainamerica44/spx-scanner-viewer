@@ -548,28 +548,6 @@ function drawPriceChart(s){
   const orLbl = el('text', {x: padL + 4, y: yOf(orHi) - 3, fill: '#58a6ff', 'font-size': 10}); orLbl.textContent = 'OR ' + orBars * stepMin + 'm';
   svg.appendChild(orLbl);
 
-  // opening-range breaks: mark every bar-close that crosses back above/below the
-  // band once it's locked (mirrors the standalone ORB Pine script's showBrk)
-  let wasAbove = candles[orBars - 1] ? candles[orBars - 1].c > orHi : false;
-  let wasBelow = candles[orBars - 1] ? candles[orBars - 1].c < orLo : false;
-  for (let i = orBars; i < n; i++) {
-    const c = candles[i], x = xOf(i);
-    const isAbove = c.c > orHi, isBelow = c.c < orLo;
-    if (isAbove && !wasAbove) {
-      const y = yOf(orHi);
-      const tri = el('polygon', {points: `${x-4},${y+2} ${x+4},${y+2} ${x},${y-6}`, fill: '#58a6ff'});
-      const t = el('title', {}); t.textContent = timeOf(c.t) + '  broke ABOVE the opening range';
-      tri.appendChild(t); svg.appendChild(tri);
-    }
-    if (isBelow && !wasBelow) {
-      const y = yOf(orLo);
-      const tri = el('polygon', {points: `${x-4},${y-2} ${x+4},${y-2} ${x},${y+6}`, fill: '#58a6ff'});
-      const t = el('title', {}); t.textContent = timeOf(c.t) + '  broke BELOW the opening range';
-      tri.appendChild(t); svg.appendChild(tri);
-    }
-    wasAbove = isAbove; wasBelow = isBelow;
-  }
-
   // walls + zero-gamma flip (current-cycle levels, flat across the session)
   const lvl = (v, col, label) => {
     if (!v) return;
