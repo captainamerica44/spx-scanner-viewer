@@ -597,9 +597,14 @@ function drawPriceChart(s){
     svg.appendChild(tri);
   });
 
-  // large prints: diamond at the underlying spot when the print hit, sized by $ premium
+  // large prints: diamond at the underlying spot when the print hit, sized by $ premium.
+  // Only individual prints >= display_print_min_usd get a diamond (decluttered);
+  // the cluster labels below still see every print, so a real whale made of
+  // several smaller legs doesn't disappear just because none of them alone qualifies.
+  const displayMin = s.display_print_min_usd != null ? s.display_print_min_usd : 0;
   const diaR = premium => Math.max(3.5, Math.min(11, 2.8 + Math.sqrt((premium||0) / 1e6) * 1.5));
-  prints.forEach(p => {
+  const shown = prints.filter(p => (p.premium || 0) >= displayMin);
+  shown.forEach(p => {
     const i = idxNear(p.ts), x = xOf(i);
     const y = yOf(p.spot != null ? +p.spot : candles[i].c);
     const call = p.type === 'call', col = call ? '#3fb950' : '#f85149', r = diaR(p.premium);
@@ -609,7 +614,37 @@ function drawPriceChart(s){
     svg.appendChild(dia);
   });
 
-  legend.innerHTML = fires.length + ' signal fires &middot; ' + prints.length + ' large prints today &middot; '
+  // cluster-aggregate labels (mirrors the standalone Pine overlay's whale
+  // label): bucket ALL prints -- not just the ones that got a diamond -- into
+  // 5-min windows; a bunch of sub-threshold prints in the same window can add
+  // up to a real whale even though no single leg cleared displayMin.
+  const WHALE_TOTAL = 9_000_000;
+  const clusters = {};
+  prints.forEach(p => {
+    const bucket = Math.floor(hhmmss(timeOf(p.ts)) / 300) * 300;
+    const c = clusters[bucket] || (clusters[bucket] = {call: 0, put: 0, callTxt: [], putTxt: [], i: idxNear(p.ts)});
+    if (p.type === 'call') { c.call += (p.premium || 0); c.callTxt.push(timeOf(p.ts) + '  ' + p.strike + 'C  $' + money(p.premium)); }
+    else { c.put += (p.premium || 0); c.putTxt.push(timeOf(p.ts) + '  ' + p.strike + 'P  $' + money(p.premium)); }
+  });
+  Object.values(clusters).forEach(c => {
+    const x = xOf(c.i);
+    if (c.call >= WHALE_TOTAL) {
+      const y = yOf(candles[c.i].l) + 16;
+      const t = el('text', {x, y, fill: '#3fb950', 'font-size': 11, 'font-weight': 700, 'text-anchor': 'middle'});
+      t.textContent = '$' + Math.round(c.call / 1e6) + 'M calls';
+      const title = el('title', {}); title.textContent = c.callTxt.join('\n'); t.appendChild(title);
+      svg.appendChild(t);
+    }
+    if (c.put >= WHALE_TOTAL) {
+      const y = yOf(candles[c.i].h) - 10;
+      const t = el('text', {x, y, fill: '#f85149', 'font-size': 11, 'font-weight': 700, 'text-anchor': 'middle'});
+      t.textContent = '$' + Math.round(c.put / 1e6) + 'M puts';
+      const title = el('title', {}); title.textContent = c.putTxt.join('\n'); t.appendChild(title);
+      svg.appendChild(t);
+    }
+  });
+
+  legend.innerHTML = fires.length + ' signal fires &middot; ' + shown.length + ' of ' + prints.length + ' prints shown as diamonds (&gt;= $' + (displayMin/1e6).toFixed(1) + 'M) &middot; '
     + 'candles can lag live spot by up to one bar interval (Robinhood returns completed bars only)';
 }
 
