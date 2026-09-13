@@ -1,0 +1,837 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SPX 0DTE Monitor</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2430; --line:#30363d;
+    --txt:#e6edf3; --dim:#8b949e; --pos:#3fb950; --neg:#f85149;
+    --bull:#3fb950; --bear:#f85149; --warn:#d29922; --accent:#58a6ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font:14px/1.4 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:1200px;margin:0 auto;padding:16px}
+  header{display:flex;align-items:baseline;gap:18px;flex-wrap:wrap;margin-bottom:6px}
+  .spot{font-size:40px;font-weight:700;letter-spacing:-1px}
+  .spot small{font-size:16px;font-weight:500;color:var(--dim);margin-left:8px}
+  .chg.up{color:var(--pos)} .chg.down{color:var(--neg)}
+  .regime{padding:6px 14px;border-radius:8px;font-weight:700;font-size:15px;letter-spacing:.5px}
+  .regime.POSITIVE{background:rgba(63,185,80,.15);color:var(--pos);border:1px solid var(--pos)}
+  .regime.NEGATIVE{background:rgba(248,81,73,.15);color:var(--neg);border:1px solid var(--neg)}
+  .regime.UNKNOWN{background:var(--panel2);color:var(--dim);border:1px solid var(--line)}
+  .upd{margin-left:auto;color:var(--dim);font-size:12px;text-align:right}
+  .upd .stale{color:var(--warn);font-weight:700}
+  .read{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);
+    border-radius:6px;padding:10px 14px;margin:10px 0 16px;color:var(--txt)}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px}
+  .tile{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+  .tile .k{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.6px}
+  .tile .v{font-size:22px;font-weight:700;margin-top:3px}
+  .tile .v small{font-size:13px;color:var(--dim);font-weight:500}
+  .v.bull{color:var(--bull)} .v.bear{color:var(--bear)}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;margin-bottom:16px}
+  .panel h3{margin:0 0 10px;font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--dim)}
+  .strip{position:relative;height:78px;margin:14px 8px 26px}
+  .strip .track{position:absolute;top:34px;left:0;right:0;height:6px;background:var(--panel2);border-radius:3px}
+  .strip .mark{position:absolute;top:24px;width:2px;height:26px;background:var(--dim)}
+  .strip .mark.spot{background:#fff;height:40px;top:18px;width:3px}
+  .strip .mark.cw{background:var(--pos)} .strip .mark.pw{background:var(--neg)}
+  .strip .mark.zg{background:var(--warn)}
+  .strip .mark.vwap{background:#3ac0d0} .strip .lbl.vwapc{color:#3ac0d0}
+  .strip .lbl{position:absolute;font-size:11px;color:var(--dim);transform:translateX(-50%);white-space:nowrap}
+  .strip .lbl.spot{top:0;color:#fff;font-weight:700;font-size:12px}
+  .strip .lbl.r0{top:44px} .strip .lbl.r1{top:59px}
+  .tablewrap{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-size:13px;min-width:640px}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+  th{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+  td.num{text-align:right;font-variant-numeric:tabular-nums}
+  tr.BULLISH td:first-child{box-shadow:inset 3px 0 0 var(--bull)}
+  tr.BEARISH td:first-child{box-shadow:inset 3px 0 0 var(--bear)}
+  .chip{display:inline-block;padding:1px 6px;margin:1px 4px 1px 0;border-radius:4px;font-size:11px;
+    background:var(--panel2);border:1px solid var(--line);color:var(--dim)}
+  .chip.SWEEP_LIKE{color:var(--accent);border-color:var(--accent)}
+  .chip.LADDER{color:var(--warn);border-color:var(--warn)}
+  .chip.NEW_POSITIONING{color:var(--pos);border-color:var(--pos)}
+  .chip.LARGE_PRINT{color:#e3b341;border-color:#e3b341;font-weight:700}
+  .side.ABOVE_ASK,.side.AT_ASK{color:var(--bull)}
+  .side.BELOW_BID,.side.AT_BID{color:var(--bear)}
+  .side.MID,.side.UNKNOWN{color:var(--dim)}
+  .muted{color:var(--dim)} .empty{color:var(--dim);padding:12px 8px}
+  svg{display:block;width:100%;height:auto}
+
+  /* signal banner */
+  .signal{display:flex;align-items:center;gap:14px;padding:12px 16px;border-radius:10px;
+    margin-bottom:14px;font-weight:800;letter-spacing:.5px;border:1px solid}
+  .signal .arrow{font-size:26px;line-height:1}
+  .signal .main{font-size:19px}
+  .signal .sub{font-size:12px;font-weight:600;letter-spacing:.3px;opacity:.85}
+  .signal .agree{margin-left:auto;font-size:12px;font-weight:600;opacity:.85}
+  .signal.up{background:rgba(63,185,80,.16);border-color:var(--bull);color:var(--bull)}
+  .signal.down{background:rgba(248,81,73,.16);border-color:var(--bear);color:var(--bear)}
+  .signal.none{background:var(--panel);border-color:var(--line);color:var(--dim)}
+
+  /* lean score */
+  .lean{margin-bottom:16px}
+  .leanhead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+  .leanscore{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums}
+  .leanscore.up{color:var(--bull)} .leanscore.down{color:var(--bear)} .leanscore.flat{color:var(--dim)}
+  .leanlabel{font-size:14px;font-weight:600}
+  .leanmeta{margin-left:auto;color:var(--dim);font-size:12px}
+  .leanmeta b{color:var(--txt);font-weight:600}
+  .leanbar{position:relative;height:12px;border-radius:6px;margin:4px 0 12px;
+    background:linear-gradient(90deg,rgba(248,81,73,.20),rgba(139,148,158,.10) 50%,rgba(63,185,80,.20))}
+  .leanbar-zero{position:absolute;left:50%;top:-3px;bottom:-3px;width:2px;background:var(--line)}
+  .leanbar-fill{position:absolute;top:0;bottom:0;background:var(--dim);opacity:.5;border-radius:6px}
+  .leanbar-fill.up{background:var(--bull)} .leanbar-fill.down{background:var(--bear)}
+  .leanbar-dot{position:absolute;top:50%;width:12px;height:12px;border-radius:50%;
+    background:#fff;border:2px solid var(--panel);transform:translate(-50%,-50%)}
+  .leancomps{display:flex;flex-direction:column;gap:3px;font-size:12.5px}
+  .leancomps div{display:flex;gap:8px}
+  .leancomps .pts{flex:none;width:2.6rem;text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+  .leancomps .pts.up{color:var(--bull)} .leancomps .pts.down{color:var(--bear)}
+  .leancomps .cnote{color:var(--dim)}
+
+  /* signal-momentum gauge */
+  .gauge{display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+  .gauge svg{width:230px;height:auto;flex:none}
+  .glabel{font-size:16px;font-weight:800;letter-spacing:.3px}
+  .glabel.up{color:var(--bull)} .glabel.down{color:var(--bear)}
+  .glabel.flat{color:var(--dim)} .glabel.stall{color:var(--warn)}
+  .gsub{color:var(--dim);font-size:12px;margin-top:4px}
+  .gfires{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
+  .gfire{font-size:11px;padding:1px 7px;border-radius:10px;border:1px solid var(--line);color:var(--dim)}
+  .gfire.up{color:var(--bull);border-color:var(--bull)}
+  .gfire.down{color:var(--bear);border-color:var(--bear)}
+  .gaugelog{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+  .gaugelog h4{margin:0 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--dim)}
+  .gaugelog .rows{display:flex;flex-direction:column;gap:2px;font-size:12px;max-height:180px;overflow-y:auto}
+  .gaugelog .row{display:flex;gap:8px;align-items:baseline}
+  .gaugelog .t{color:var(--dim);flex:none;width:4.4rem;font-variant-numeric:tabular-nums}
+  .gaugelog .d{flex:none;width:1rem;font-weight:700;text-align:center}
+  .gaugelog .d.up{color:var(--bull)} .gaugelog .d.down{color:var(--bear)}
+  .gaugelog .meta{color:var(--dim)}
+  .gaugelog .flip{color:var(--warn)}
+  .gaugelog .empty{color:var(--dim)}
+  .tickerbar{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+  .tickerbar button{background:var(--panel);border:1px solid var(--line);color:var(--dim);
+    border-radius:8px;padding:6px 14px;font-size:14px;font-weight:700;cursor:pointer;letter-spacing:.5px}
+  .tickerbar button.on{color:var(--txt);border-color:var(--accent);background:var(--panel2)}
+  .tickerbar button .rg{font-size:10px;font-weight:600;margin-left:6px;opacity:.7}
+  .tickerbar button .sd{font-size:11px;margin-left:6px}
+  .tickerbar button .sd.up{color:var(--bull)} .tickerbar button .sd.down{color:var(--bear)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+  .gcard{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;cursor:pointer}
+  .gcard:hover{border-color:var(--accent)}
+  .gcard .gc-top{display:flex;align-items:baseline;gap:10px;margin-bottom:6px}
+  .gcard .gc-sym{font-size:20px;font-weight:800;letter-spacing:.5px}
+  .gcard .gc-spot{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
+  .gcard .gc-chg{font-size:12px}
+  .gcard .gc-chg.up{color:var(--bull)} .gcard .gc-chg.down{color:var(--bear)}
+  .gcard .gc-rg{margin-left:auto;font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px}
+  .gcard .gc-rg.POSITIVE{background:rgba(63,185,80,.15);color:var(--bull)}
+  .gcard .gc-rg.NEGATIVE{background:rgba(248,81,73,.15);color:var(--bear)}
+  .gcard .gc-rg.UNKNOWN{background:var(--panel2);color:var(--dim)}
+  .gcard .gc-sig{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:800;margin:8px 0;
+    padding:6px 10px;border-radius:8px;border:1px solid}
+  .gcard .gc-sig.up{background:rgba(63,185,80,.14);border-color:var(--bull);color:var(--bull)}
+  .gcard .gc-sig.down{background:rgba(248,81,73,.14);border-color:var(--bear);color:var(--bear)}
+  .gcard .gc-sig.none{background:var(--panel2);border-color:var(--line);color:var(--dim)}
+  .gcard .gc-row{display:flex;justify-content:space-between;font-size:12px;color:var(--dim);margin-top:5px}
+  .gcard .gc-row b{color:var(--txt);font-weight:600;font-variant-numeric:tabular-nums}
+  .gcard .gc-lean.up b{color:var(--bull)} .gcard .gc-lean.down b{color:var(--bear)}
+  .gcard .gc-gsvg{width:110px;height:auto;display:block;margin:2px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="tickerbar" id="tickerbar"></div>
+
+  <div id="gridview" hidden>
+    <h2 style="font-size:16px;color:var(--dim);letter-spacing:.5px;margin:4px 0 12px">ALL TICKERS &mdash; click a card for the full view</h2>
+    <div class="grid" id="grid"></div>
+    <div class="upd" id="grid-upd" style="text-align:left;margin-top:10px"></div>
+  </div>
+
+  <div id="deepview">
+  <div style="margin-bottom:8px"><button id="backbtn" style="background:var(--panel);border:1px solid var(--line);color:var(--dim);border-radius:8px;padding:4px 12px;font-size:12px;cursor:pointer">&larr; all tickers</button></div>
+  <header>
+    <div class="spot" id="spot">--<small id="exp"></small></div>
+    <div class="chg" id="chg"></div>
+    <div class="regime UNKNOWN" id="regime">--</div>
+    <div class="upd" id="upd"></div>
+  </header>
+
+  <div class="signal none" id="signal">
+    <span class="arrow" id="sig-arrow">—</span>
+    <span><span class="main" id="sig-main">NO SIGNAL</span>
+      <span class="sub" id="sig-sub"></span></span>
+    <span class="agree" id="sig-agree"></span>
+  </div>
+
+  <div class="read" id="read">waiting for scanner…</div>
+
+  <div class="panel lean" id="leanpanel" style="display:none">
+    <h3>Lean &mdash; weighted directional opinion (not a probability)</h3>
+    <div class="leanhead">
+      <span class="leanscore" id="leanscore">--</span>
+      <span class="leanlabel" id="leanlabel"></span>
+      <span class="leanmeta" id="leanmeta"></span>
+    </div>
+    <div class="leanbar">
+      <div class="leanbar-zero"></div>
+      <div class="leanbar-fill" id="leanfill"></div>
+      <div class="leanbar-dot" id="leandot"></div>
+    </div>
+    <div class="leancomps" id="leancomps"></div>
+  </div>
+
+  <div class="panel" id="gaugepanel" style="display:none">
+    <h3>Signal momentum &mdash; decaying energy from signal fires</h3>
+    <div class="gauge">
+      <svg id="gaugesvg" viewBox="0 0 200 120" aria-hidden="true"></svg>
+      <div>
+        <div class="glabel" id="glabel">&mdash;</div>
+        <div class="gsub" id="gsub"></div>
+        <div class="gfires" id="gfires"></div>
+      </div>
+    </div>
+    <div class="gaugelog">
+      <h4>Signal fires today (<span id="siglogcount">0</span>)</h4>
+      <div class="rows" id="siglog"></div>
+    </div>
+  </div>
+
+  <div class="tiles">
+    <div class="tile"><div class="k">Net GEX / 1%</div><div class="v" id="netgex">--</div></div>
+    <div class="tile"><div class="k">Zero-Gamma Flip</div><div class="v" id="zg">--</div></div>
+    <div class="tile"><div class="k">GEX Call Wall</div><div class="v" id="cw">--</div></div>
+    <div class="tile"><div class="k">GEX Put Wall</div><div class="v" id="pw">--</div></div>
+    <div class="tile"><div class="k">OI Call Wall</div><div class="v" id="oicw">--</div></div>
+    <div class="tile"><div class="k">OI Put Wall</div><div class="v" id="oipw">--</div></div>
+    <div class="tile"><div class="k">VWAP <span id="vwapstate" class="muted"></span></div><div class="v" id="vwap">--</div></div>
+    <div class="tile"><div class="k">Vol POC / value area</div><div class="v" id="poc">--</div></div>
+    <div class="tile"><div class="k">VIX</div><div class="v" id="vix">--</div></div>
+    <div class="tile"><div class="k">Flow $ (cycle) — prem / Δ-hedge</div><div class="v" id="netdir">--</div></div>
+    <div class="tile"><div class="k">Alerts today</div><div class="v" id="alerts">--</div></div>
+  </div>
+
+  <div class="panel">
+    <h3>Spot vs. gamma structure</h3>
+    <div class="strip" id="strip"></div>
+  </div>
+
+  <div class="panel">
+    <h3>Live price &mdash; <span id="pxbars" class="muted"></span> &middot; walls/flip &middot; signal fires &middot; large prints &middot; 15m opening range</h3>
+    <svg id="pxchart" viewBox="0 0 1000 320" preserveAspectRatio="none"></svg>
+    <div id="pxlegend" class="muted" style="font-size:11px;margin-top:8px"></div>
+  </div>
+
+  <div class="panel">
+    <h3>Net GEX by strike (green = dealer long gamma / dampening, red = short / amplifying)
+      &mdash; combined <span id="gexexp" class="muted"></span></h3>
+    <div id="gexdte" class="muted" style="font-size:12px;margin-bottom:4px"></div>
+    <div id="oiwalldte" class="muted" style="font-size:12px;margin-bottom:8px"></div>
+    <svg id="chart" viewBox="0 0 1000 240" preserveAspectRatio="none"></svg>
+  </div>
+
+  <div class="panel">
+    <h3>Large prints — newest first (<span id="feedcount">0</span>)</h3>
+    <div id="threshinfo" class="muted" style="font-size:12px;margin:-4px 0 10px"></div>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Time</th><th>Contract</th><th>DTE</th><th class="num">Premium</th>
+        <th>Side</th><th>Dir</th><th>Conf</th><th class="num">Vol/OI</th><th>Tags</th></tr></thead>
+      <tbody id="feed"><tr><td colspan="9" class="empty">no prints yet</td></tr></tbody>
+    </table></div>
+  </div>
+  </div><!-- /deepview -->
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const money = n => {
+  const a = Math.abs(n);
+  if (a >= 1e9) return (n/1e9).toFixed(2)+'B';
+  if (a >= 1e6) return (n/1e6).toFixed(2)+'M';
+  if (a >= 1e3) return (n/1e3).toFixed(0)+'k';
+  return n.toFixed(0);
+};
+
+let SELECTED = null;      // null = grid view; a symbol = deep view
+
+function render(payload){
+  // payload may be the legacy flat ticker-state, or {tickers:{SYM:state}, symbols:[...]}
+  let syms = payload && payload.symbols;
+  let tickers = payload && payload.tickers;
+  if(!tickers){                       // legacy single-ticker payload
+    tickers = {SPX: payload}; syms = ['SPX'];
+  }
+  drawTickerBar(syms, tickers, payload);
+
+  const single = !syms || syms.length < 2;
+  const showGrid = !single && (SELECTED == null || !tickers[SELECTED]);
+  $('gridview').hidden = !showGrid;
+  $('deepview').hidden = showGrid;
+  $('backbtn').style.display = single ? 'none' : '';
+
+  if(showGrid){
+    drawGrid(syms, tickers, payload);
+    return;
+  }
+  if(SELECTED == null || !tickers[SELECTED]) SELECTED = (syms && syms[0]) || Object.keys(tickers)[0];
+  const s = tickers[SELECTED];
+  s.__top = payload;                  // stash top-level for freshness
+  renderTicker(s);
+}
+
+function gaugeMiniSVG(gg){
+  if(!gg) return '';
+  const a = 90 + Math.max(-90, Math.min(90, gg.angle||0));
+  const cx=100,cy=100,r=78;
+  const pt = (d,rad)=>[cx - rad*Math.cos(d*Math.PI/180), cy - rad*Math.sin(d*Math.PI/180)];
+  const arc = (d1,d2,c)=>{ const [x1,y1]=pt(d1,r),[x2,y2]=pt(d2,r);
+    return `<path d="M ${x1.toFixed(0)} ${y1.toFixed(0)} A ${r} ${r} 0 0 1 ${x2.toFixed(0)} ${y2.toFixed(0)}" fill="none" stroke="${c}" stroke-width="12" stroke-linecap="round"/>`; };
+  const [nx,ny]=pt(a, r-14);
+  return `<svg class="gc-gsvg" viewBox="0 0 200 118">${arc(0,72,'#f85149')}${arc(72,108,'#8b949e')}${arc(108,180,'#3fb950')}`
+    + `<line x1="${cx}" y1="${cy}" x2="${nx.toFixed(0)}" y2="${ny.toFixed(0)}" stroke="#e6edf3" stroke-width="4" stroke-linecap="round"/>`
+    + `<circle cx="${cx}" cy="${cy}" r="5" fill="#e6edf3"/></svg>`;
+}
+
+function drawGrid(syms, tickers, payload){
+  const g = $('grid');
+  g.innerHTML = syms.map(sym=>{
+    const t = tickers[sym] || {};
+    const gx = t.gex || {}, L = t.lean || {}, gg = t.gauge || {};
+    const sc = L.score_smoothed!=null ? L.score_smoothed : L.score;
+    const ldir = sc>0.5?'up':sc<-0.5?'down':'flat';
+    const chg = (t.spot!=null && t.prev_spot) ? (t.spot - t.prev_spot) : null;
+    const sig = (L.signal||{});
+    const sd = sig.dir && sig.dir!=='none' ? sig.dir : 'none';
+    const sigTxt = sd==='none' ? 'NO SIGNAL'
+      : (sd==='up'?'▲ UP':'▼ DOWN') + ' · ' + (sig.kind||'').toUpperCase() + ' · ' + (sig.strength||'');
+    const hist = t.signal_history || [];
+    const lastFire = hist.length ? hist[hist.length-1] : null;
+    const lastTxt = lastFire ? ('last fire ' + (lastFire.ts||'').slice(11,16) + ' ' + (lastFire.dir==='up'?'▲':'▼')) : 'no fires today';
+    const rg = gx.regime || 'UNKNOWN';
+    const gexNote = (gx.confidence && gx.confidence!=='high') ? ` (${gx.confidence}-conf)` : '';
+    return `<div class="gcard" data-sym="${sym}">
+      <div class="gc-top">
+        <span class="gc-sym">${sym}</span>
+        <span class="gc-spot">${t.spot!=null? (+t.spot).toFixed(2):'--'}</span>
+        ${chg!=null?`<span class="gc-chg ${chg>=0?'up':'down'}">${chg>=0?'+':''}${chg.toFixed(2)}</span>`:''}
+        <span class="gc-rg ${rg}">${rg[0]}${gexNote}</span>
+      </div>
+      <div class="gc-sig ${sd}">${sigTxt}${sig.agree!=null?` · ${Math.round(sig.agree*6)}/6`:''}</div>
+      ${t.signal_engine!==false ? gaugeMiniSVG(gg) : '<div style="font-size:11px;color:var(--dim);margin:6px 0">structural only</div>'}
+      <div class="gc-row gc-lean ${ldir}"><span>lean</span><b>${L.score!=null?(L.score>=0?'+':'')+L.score.toFixed(1):'--'}${sc!=null&&sc!==L.score?' → '+(sc>=0?'+':'')+(+sc).toFixed(1):''}</b></div>
+      <div class="gc-row"><span>net GEX</span><b>${gx.net_gex!=null?(gx.net_gex>=0?'+':'')+money(gx.net_gex):'--'}</b></div>
+      <div class="gc-row"><span>CW / PW / flip</span><b>${gx.call_wall??'--'} / ${gx.put_wall??'--'} / ${gx.zero_gamma?Math.round(gx.zero_gamma):'--'}</b></div>
+      <div class="gc-row"><span>${lastTxt}</span><b>${t.alerts_today!=null?t.alerts_today+' alerts':''}</b></div>
+    </div>`;
+  }).join('');
+  g.querySelectorAll('.gcard').forEach(c=>c.addEventListener('click',()=>{
+    SELECTED = c.dataset.sym; render(window.__last || payload);
+  }));
+  const top = payload || {};
+  if(top.age_seconds!=null)
+    $('grid-upd').textContent = 'chain ' + Math.round(top.age_seconds) + 's ago · ' + (top.ts||'')
+      + (top.vix ? '  ·  VIX ' + top.vix.toFixed(2) : '');
+}
+
+let _barKey = '';
+function drawTickerBar(syms, tickers, payload){
+  const bar = $('tickerbar'); if(!bar || !syms) return;
+  const key = syms.join(',');
+  if(key !== _barKey){                 // (re)build buttons only when the set changes
+    _barKey = key;
+    bar.innerHTML = syms.map(sym=>
+      `<button data-sym="${sym}"><span class="nm">${sym}</span>`
+      + `<span class="rg"></span><span class="sd"></span></button>`).join('');
+    bar.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
+      SELECTED = b.dataset.sym; render(window.__last || payload);
+    }));
+  }
+  bar.querySelectorAll('button').forEach(b=>{
+    const sym = b.dataset.sym, t = tickers[sym] || {}, lean = t.lean || {};
+    const sc = lean.score_smoothed!=null ? lean.score_smoothed : lean.score;
+    const dir = sc>0.5?'up':sc<-0.5?'down':'';
+    b.classList.toggle('on', sym===SELECTED);
+    b.querySelector('.rg').textContent = (t.gex && t.gex.regime) ? t.gex.regime[0] : '';
+    const sd = b.querySelector('.sd');
+    sd.textContent = sc!=null ? (sc>=0?'+':'') + (+sc).toFixed(1) : '';
+    sd.className = 'sd ' + dir;
+  });
+}
+
+function renderTicker(s){
+  if(!s || !s.spot){ $('read').textContent = s && s.status ? s.status : 'waiting…'; return; }
+
+  const expTxt = (s.expiries && s.expiries.length)
+    ? s.expiries.map(e=>e.slice(5)).join(' / ') : (s.expiration||'');
+  $('spot').innerHTML = s.spot.toFixed(2) + '<small id="exp"> &nbsp;exp ' + expTxt + '</small>';
+  if (s.prev_spot){
+    const d = s.spot - s.prev_spot;
+    $('chg').textContent = (d>=0?'+':'') + d.toFixed(2) + ' (cycle)';
+    $('chg').className = 'chg ' + (d>=0?'up':'down');
+  }
+  const g = s.gex || {};
+  const reg = g.regime || 'UNKNOWN';
+  $('regime').textContent = reg + (reg==='POSITIVE'?' · dampening':reg==='NEGATIVE'?' · amplifying':'');
+  $('regime').className = 'regime ' + reg;
+
+  $('read').textContent = s.read || '';
+
+  const sig = (s.lean||{}).signal;
+  const sigEl = $('signal');
+  if (sig && sig.dir && sig.dir !== 'none'){
+    sigEl.className = 'signal ' + sig.dir;
+    $('sig-arrow').textContent = sig.dir === 'up' ? '▲' : '▼';
+    $('sig-main').textContent = (sig.dir === 'up' ? 'UP' : 'DOWN') + ' — ' + (sig.kind||'').toUpperCase();
+    $('sig-sub').textContent = (sig.strength||'') + (sig.kind==='reversal'?' · lean opposes the current move':sig.kind==='continuation'?' · lean agrees with the move':'');
+    $('sig-agree').textContent = sig.agree!=null ? Math.round(sig.agree*6)+'/6 components agree' : '';
+  } else {
+    sigEl.className = 'signal none';
+    $('sig-arrow').textContent = '—';
+    $('sig-main').textContent = 'NO SIGNAL';
+    $('sig-sub').textContent = sig && sig.kind==='range' ? ' · range / low conviction' : '';
+    $('sig-agree').textContent = '';
+  }
+
+  let trend = '';
+  if (g.prev_net_gex != null && g.net_gex != null)
+    trend = g.net_gex >= g.prev_net_gex ? ' ▲' : ' ▼';
+  $('netgex').innerHTML = (g.net_gex!=null? '$'+money(g.net_gex) : '--') + '<small>'+trend+'</small>';
+  $('zg').textContent = g.zero_gamma ? Math.round(g.zero_gamma) : 'n/a';
+  $('cw').textContent = g.call_wall ?? '--';
+  $('pw').textContent = g.put_wall ?? '--';
+  $('oicw').textContent = g.oi_call_wall ?? '--';
+  $('oipw').textContent = g.oi_put_wall ?? '--';
+
+  if (s.vix != null && s.vix > 0){
+    const vc = s.vix_chg || 0;
+    // vol up (red) is risk-off, vol down (green) is risk-on
+    $('vix').innerHTML = s.vix.toFixed(2) +
+      '<small style="color:'+(vc>0.05?'var(--bear)':vc<-0.05?'var(--bull)':'var(--dim)')+'"> '+
+      (vc>=0?'+':'')+vc.toFixed(2)+'</small>';
+  } else { $('vix').textContent = '--'; }
+
+  const sp = s.spy || {};
+  if (sp.vwap){
+    const dp = sp.vwap_dist_pct || 0;
+    $('vwap').innerHTML = Math.round(sp.vwap) +
+      '<small style="color:'+(sp.above_vwap?'var(--bull)':'var(--bear)')+'"> '+(dp>=0?'+':'')+dp.toFixed(2)+'%</small>';
+    $('vwapstate').textContent = sp.above_vwap ? 'above' : 'below';
+    if (sp.poc){
+      $('poc').innerHTML = Math.round(sp.poc) +
+        '<small> &nbsp;'+Math.round(sp.val)+'–'+Math.round(sp.vah)+
+        (sp.in_value_area?'':' <span style="color:var(--warn)">·out</span>')+'</small>';
+    } else { $('poc').textContent = '--'; }
+  } else { $('vwap').textContent='--'; $('poc').textContent='--'; $('vwapstate').textContent=''; }
+
+  drawLean(s.lean);
+  drawGauge(s.gauge);
+  drawSignalLog(s.signal_history);
+
+  const bexp = g.by_expiry || [];
+  $('gexexp').textContent = s.expiries ? '(' + s.expiries.map(e=>e.slice(5)).join(' + ') + ')' : '';
+  $('gexdte').innerHTML = bexp.length
+    ? 'net GEX by expiry: ' + bexp.map(e=>{
+        const b = (e.net_gex/1e9);
+        const col = b>=0 ? 'var(--pos)' : 'var(--neg)';
+        return `<b style="color:${col}">${e.dte}DTE ${b>=0?'+':''}${b.toFixed(2)}B</b>`;
+      }).join(' &nbsp;·&nbsp; ')
+    : '';
+  $('oiwalldte').innerHTML = bexp.length
+    ? 'OI wall by expiry: ' + bexp.map(e=>
+        `<b>${e.dte}DTE C${e.oi_call_wall??'--'}/P${e.oi_put_wall??'--'}</b>`
+      ).join(' &nbsp;·&nbsp; ')
+    : '';
+
+  const thr = (s.cycle||{}).large_print_threshold;
+  if (thr && thr.value != null){
+    $('threshinfo').textContent = thr.mode === 'adaptive'
+      ? `large-print bar: $${money(thr.value)} (adaptive, p${thr.percentile}, n=${thr.n_samples}${thr.warm?'':' · warming up, using fixed fallback'})`
+      : `large-print bar: $${money(thr.value)} (fixed)`;
+  } else { $('threshinfo').textContent = ''; }
+
+  const nd = (s.cycle||{}).net_directional_premium;
+  const dh = (s.cycle||{}).dealer_hedge;
+  if (nd != null){
+    let t = (nd>=0?'+':'') + '$' + money(nd);
+    if (dh != null && Math.abs(dh) > 1e7)
+      t += ' <small style="color:var(--dim)">/ '+(dh>=0?'+':'')+'$'+money(dh)+'</small>';
+    $('netdir').innerHTML = t;
+    $('netdir').className = 'v ' + (nd>0?'bull':nd<0?'bear':'');
+  }
+  $('alerts').textContent = (s.alerts_today != null ? s.alerts_today : (s.cycle||{}).alerts ?? '--');
+
+  // freshness: from the top-level payload (shared across tickers)
+  const top = s.__top || {};
+  const age = top.age_seconds, sage = top.spot_age_seconds;
+  if (age != null){
+    const stale = age > (top.stale_after || s.stale_after || 120);
+    const spotTxt = sage != null ? 'spot ' + Math.round(sage) + 's · ' : '';
+    $('upd').innerHTML = spotTxt + 'chain ' + Math.round(age) + 's ago'
+      + (stale ? ' &nbsp;<span class="stale">⚠ STALE</span>' : '')
+      + '<br><span class="muted">' + (s.ts||'') + '</span>';
+  }
+
+  drawStrip(s); drawChart(g); drawPriceChart(s);
+  drawFeed(s.recent_events || []);
+}
+
+function drawPriceChart(s){
+  const svg = $('pxchart'); svg.innerHTML = '';
+  const legend = $('pxlegend');
+  const sp = s.spy || {};
+  const ownBars = s.own_bars || [];
+  const usingOwn = ownBars.length >= 2;
+  const candles = usingOwn ? ownBars : (sp.candles || []);
+  $('pxbars').textContent = candles.length
+    ? (usingOwn ? 'own 1m bars (real SPX, ' + candles.length + ' today)'
+                : (sp.proxy || 'SPY') + ' 5m bars, scaled to SPX pts (' + candles.length + ' today)')
+    : 'waiting for today’s bars…';
+  if (candles.length < 2){
+    legend.textContent = '';
+    return;
+  }
+
+  const W = 1000, H = 320, padL = 46, padR = 8, padT = 10, padB = 22;
+  const innerW = W - padL - padR, innerH = H - padT - padB;
+  const ns = 'http://www.w3.org/2000/svg';
+  const el = (tag, attrs) => {
+    const e = document.createElementNS(ns, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  };
+  const hhmmss = t => { const p = (t||'0:0:0').split(':').map(Number); return p[0]*3600 + p[1]*60 + (p[2]||0); };
+  const timeOf = t => (t || '').slice(11, 19);
+
+  const n = candles.length;
+  const g = s.gex || {};
+  const today = candles[0].t.slice(0, 10);
+  const fires = (s.signal_history || []).filter(f => (f.ts || '').slice(0, 10) === today);
+  const prints = s.day_large_prints || [];
+
+  // y-domain: candle range padded, widened to include walls/flip so nothing clips
+  let lo = Math.min(...candles.map(c => c.l)), hi = Math.max(...candles.map(c => c.h));
+  [g.call_wall, g.put_wall, g.zero_gamma].forEach(v => { if (v){ lo = Math.min(lo, v); hi = Math.max(hi, v); } });
+  const padV = (hi - lo) * 0.08 || 1;
+  lo -= padV; hi += padV;
+  const yOf = v => padT + innerH * (1 - (v - lo) / (hi - lo));
+  const bw = innerW / n;
+  const xOf = i => padL + i * bw + bw / 2;
+  const idxNear = ts => {
+    const target = hhmmss(timeOf(ts)); let best = 0, bd = 1e18;
+    candles.forEach((c, i) => { const d = Math.abs(hhmmss(timeOf(c.t)) - target); if (d < bd){ bd = d; best = i; } });
+    return best;
+  };
+
+  // gridlines + y-axis price labels
+  for (let i = 0; i <= 5; i++){
+    const v = lo + (hi - lo) * i / 5, y = yOf(v);
+    svg.appendChild(el('line', {x1: padL, y1: y, x2: W - padR, y2: y, stroke: '#30363d', 'stroke-width': 1, 'stroke-dasharray': '2 3'}));
+    const t = el('text', {x: 2, y: y + 4, fill: '#8b949e', 'font-size': 11}); t.textContent = v.toFixed(0);
+    svg.appendChild(t);
+  }
+
+  // opening range: first 15 minutes of the session
+  const stepMin = Math.max(1, Math.round((hhmmss(timeOf(candles[1].t)) - hhmmss(timeOf(candles[0].t))) / 60));
+  const orBars = Math.min(n, Math.max(1, Math.round(15 / stepMin)));
+  const orSlice = candles.slice(0, orBars);
+  const orHi = Math.max(...orSlice.map(c => c.h)), orLo = Math.min(...orSlice.map(c => c.l));
+  svg.appendChild(el('rect', {x: padL, y: yOf(orHi), width: innerW, height: Math.max(1, yOf(orLo) - yOf(orHi)), fill: '#58a6ff', opacity: 0.07}));
+  [orHi, orLo].forEach(v => svg.appendChild(el('line', {x1: padL, y1: yOf(v), x2: W - padR, y2: yOf(v), stroke: '#58a6ff', 'stroke-width': 1, 'stroke-dasharray': '3 3'})));
+  const orLbl = el('text', {x: padL + 4, y: yOf(orHi) - 3, fill: '#58a6ff', 'font-size': 10}); orLbl.textContent = 'OR ' + orBars * stepMin + 'm';
+  svg.appendChild(orLbl);
+
+  // opening-range breaks: mark every bar-close that crosses back above/below the
+  // band once it's locked (mirrors the standalone ORB Pine script's showBrk)
+  let wasAbove = candles[orBars - 1] ? candles[orBars - 1].c > orHi : false;
+  let wasBelow = candles[orBars - 1] ? candles[orBars - 1].c < orLo : false;
+  for (let i = orBars; i < n; i++) {
+    const c = candles[i], x = xOf(i);
+    const isAbove = c.c > orHi, isBelow = c.c < orLo;
+    if (isAbove && !wasAbove) {
+      const y = yOf(orHi);
+      const tri = el('polygon', {points: `${x-4},${y+2} ${x+4},${y+2} ${x},${y-6}`, fill: '#58a6ff'});
+      const t = el('title', {}); t.textContent = timeOf(c.t) + '  broke ABOVE the opening range';
+      tri.appendChild(t); svg.appendChild(tri);
+    }
+    if (isBelow && !wasBelow) {
+      const y = yOf(orLo);
+      const tri = el('polygon', {points: `${x-4},${y-2} ${x+4},${y-2} ${x},${y+6}`, fill: '#58a6ff'});
+      const t = el('title', {}); t.textContent = timeOf(c.t) + '  broke BELOW the opening range';
+      tri.appendChild(t); svg.appendChild(tri);
+    }
+    wasAbove = isAbove; wasBelow = isBelow;
+  }
+
+  // walls + zero-gamma flip (current-cycle levels, flat across the session)
+  const lvl = (v, col, label) => {
+    if (!v) return;
+    const y = yOf(v);
+    svg.appendChild(el('line', {x1: padL, y1: y, x2: W - padR, y2: y, stroke: col, 'stroke-width': 1.3, 'stroke-dasharray': '5 3'}));
+    const t = el('text', {x: W - padR - 2, y: y - 3, fill: col, 'font-size': 10, 'text-anchor': 'end'});
+    t.textContent = label + ' ' + v.toFixed(0);
+    svg.appendChild(t);
+  };
+  lvl(g.call_wall, '#3fb950', 'CW');
+  lvl(g.put_wall, '#f85149', 'PW');
+  lvl(g.zero_gamma, '#d29922', 'Flip');
+
+  // candles
+  candles.forEach((c, i) => {
+    const x = xOf(i), up = c.c >= c.o, col = up ? '#3fb950' : '#f85149';
+    svg.appendChild(el('line', {x1: x, y1: yOf(c.h), x2: x, y2: yOf(c.l), stroke: col, 'stroke-width': 1}));
+    const bTop = yOf(Math.max(c.o, c.c)), bBot = yOf(Math.min(c.o, c.c));
+    const rect = el('rect', {x: x - bw * 0.32, y: bTop, width: Math.max(1, bw * 0.64), height: Math.max(1, bBot - bTop), fill: col});
+    const title = el('title', {}); title.textContent = timeOf(c.t) + '  O' + c.o + ' H' + c.h + ' L' + c.l + ' C' + c.c;
+    rect.appendChild(title);
+    svg.appendChild(rect);
+  });
+
+  // x-axis time labels
+  const ticks = Math.min(8, n);
+  for (let k = 0; k < ticks; k++){
+    const i = Math.round(k * (n - 1) / Math.max(1, ticks - 1));
+    const t = el('text', {x: xOf(i), y: H - 6, fill: '#8b949e', 'font-size': 10, 'text-anchor': 'middle'});
+    t.textContent = timeOf(candles[i].t).slice(0, 5);
+    svg.appendChild(t);
+  }
+
+  // signal fires: triangle pointing at the fired price, sized by strength
+  fires.forEach(f => {
+    const i = idxNear(f.ts), x = xOf(i);
+    const y = yOf(f.spot != null ? +f.spot : candles[i].c);
+    const up = f.dir === 'up', big = f.strength === 'strong' ? 7 : 5;
+    const col = up ? '#3fb950' : '#f85149';
+    const yTip = up ? y + big + 3 : y - big - 3;
+    const pts = up
+      ? `${x},${yTip} ${x-big},${yTip+big} ${x+big},${yTip+big}`
+      : `${x},${yTip} ${x-big},${yTip-big} ${x+big},${yTip-big}`;
+    const tri = el('polygon', {points: pts, fill: col});
+    const title = el('title', {}); title.textContent = timeOf(f.ts) + '  ' + f.dir + ' ' + (f.kind||'') + ' ' + (f.strength||'') + '  @ ' + f.spot;
+    tri.appendChild(title);
+    svg.appendChild(tri);
+  });
+
+  // large prints: diamond at the underlying spot when the print hit, sized by $ premium
+  const diaR = premium => Math.max(3.5, Math.min(11, 2.8 + Math.sqrt((premium||0) / 1e6) * 1.5));
+  prints.forEach(p => {
+    const i = idxNear(p.ts), x = xOf(i);
+    const y = yOf(p.spot != null ? +p.spot : candles[i].c);
+    const call = p.type === 'call', col = call ? '#3fb950' : '#f85149', r = diaR(p.premium);
+    const dia = el('polygon', {points: `${x},${y-r} ${x+r},${y} ${x},${y+r} ${x-r},${y}`, fill: col, opacity: 0.85});
+    const title = el('title', {}); title.textContent = timeOf(p.ts) + '  ' + p.strike + (call?'C':'P') + '  $' + money(p.premium) + '  ' + (p.side||'');
+    dia.appendChild(title);
+    svg.appendChild(dia);
+  });
+
+  legend.innerHTML = fires.length + ' signal fires &middot; ' + prints.length + ' large prints today &middot; '
+    + 'candles can lag live spot by up to one bar interval (Robinhood returns completed bars only)';
+}
+
+function drawLean(L){
+  const p = $('leanpanel');
+  if(!L || L.score == null){ p.style.display='none'; return; }
+  p.style.display='';
+  const sc = L.score, dir = sc>0.5?'up':sc<-0.5?'down':'flat';
+  const sm = L.score_smoothed;
+  $('leanscore').textContent = (sc>=0?'+':'') + sc.toFixed(1)
+    + (sm!=null ? ' → ' + (sm>=0?'+':'') + sm.toFixed(1) : '');
+  $('leanscore').className = 'leanscore ' + dir;
+  $('leanlabel').textContent = (L.label || '') + (sm!=null ? '  (signal uses the smoothed value)' : '');
+  $('leanmeta').innerHTML = 'momentum <b>' + (L.momentum||'?') +
+    '</b> (' + ((L.momentum_pct>=0?'+':'')+(L.momentum_pct??0).toFixed(2)) + '%) &nbsp;·&nbsp; <b>' +
+    (L.stance||'') + '</b>';
+  // bar: -10 -> 0%, 0 -> 50%, +10 -> 100%
+  const pct = v => (v/10*50) + 50;
+  const f = $('leanfill');
+  f.className = 'leanbar-fill ' + dir;
+  const a = Math.min(pct(sc),50), b = Math.max(pct(sc),50);
+  f.style.left = a + '%'; f.style.width = (b-a) + '%';
+  $('leandot').style.left = pct(Math.max(-10,Math.min(10,sc))) + '%';
+  $('leancomps').innerHTML = (L.components||[]).map(c=>{
+    const cd = c.points>0?'up':c.points<0?'down':'flat';
+    return '<div><span class="pts '+cd+'">'+(c.points>=0?'+':'')+c.points.toFixed(1)+
+      '</span><span class="cnote">'+c.note+'</span></div>';
+  }).join('');
+}
+
+function drawGauge(gg){
+  const p = $('gaugepanel');
+  if(!gg || gg.value == null){ p.style.display='none'; return; }
+  p.style.display='';
+  const ns='http://www.w3.org/2000/svg';
+  const svg = $('gaugesvg'); svg.innerHTML='';
+  const cx=100, cy=100, r=78;
+  // deg: 0 = left (needle -90), 90 = top (0), 180 = right (+90); arc goes over the top
+  const pt = (deg,rad)=>[cx - rad*Math.cos(deg*Math.PI/180), cy - rad*Math.sin(deg*Math.PI/180)];
+  const arc = (d1,d2,col)=>{
+    const [x1,y1]=pt(d1,r), [x2,y2]=pt(d2,r);
+    const a=document.createElementNS(ns,'path');
+    a.setAttribute('d',`M ${x1.toFixed(1)} ${y1.toFixed(1)} A ${r} ${r} 0 0 1 ${x2.toFixed(1)} ${y2.toFixed(1)}`);
+    a.setAttribute('fill','none'); a.setAttribute('stroke',col);
+    a.setAttribute('stroke-width','10'); a.setAttribute('stroke-linecap','round');
+    svg.appendChild(a);
+  };
+  arc(0,72,'#f85149'); arc(72,108,'#8b949e'); arc(108,180,'#3fb950');
+  const nd = 90 + Math.max(-90, Math.min(90, gg.angle||0));
+  const [nx,ny] = pt(nd, r-13);
+  const ln=document.createElementNS(ns,'line');
+  ln.setAttribute('x1',cx); ln.setAttribute('y1',cy);
+  ln.setAttribute('x2',nx.toFixed(1)); ln.setAttribute('y2',ny.toFixed(1));
+  ln.setAttribute('stroke','#e6edf3'); ln.setAttribute('stroke-width','3.5');
+  ln.setAttribute('stroke-linecap','round'); svg.appendChild(ln);
+  const hub=document.createElementNS(ns,'circle');
+  hub.setAttribute('cx',cx); hub.setAttribute('cy',cy); hub.setAttribute('r','5');
+  hub.setAttribute('fill','#e6edf3'); svg.appendChild(hub);
+  [['down',18,112],['up',182,112]].forEach(([t,x,y])=>{
+    const tx=document.createElementNS(ns,'text');
+    tx.setAttribute('x',x); tx.setAttribute('y',y); tx.setAttribute('fill','#8b949e');
+    tx.setAttribute('font-size','11'); tx.setAttribute('text-anchor',t==='down'?'start':'end');
+    tx.textContent=t; svg.appendChild(tx);
+  });
+
+  const cls = gg.stalling ? 'stall' : (gg.direction||'flat');
+  const gl = $('glabel');
+  gl.textContent = (gg.label||'').toUpperCase();
+  gl.className = 'glabel ' + cls;
+  let sub = 'energy ' + (gg.value>=0?'+':'') + gg.value.toFixed(2);
+  sub += gg.seconds_since_fire != null
+    ? ' · last fire ' + Math.round(gg.seconds_since_fire/60) + 'm ago'
+    : ' · no fires yet';
+  $('gsub').textContent = sub;
+  $('gfires').innerHTML = (gg.recent_fires||[]).map(f=>
+    `<span class="gfire ${f.dir}">${f.dir} ${String(f.strength||'').slice(0,3)} · ${f.age_min}m</span>`
+  ).join('');
+}
+
+function drawSignalLog(hist){
+  const rows = $('siglog'); if(!rows) return;
+  hist = hist || [];
+  $('siglogcount').textContent = hist.length;
+  if(!hist.length){ rows.innerHTML = '<div class="empty">no signal fires yet today</div>'; return; }
+  rows.innerHTML = hist.slice().reverse().map(h=>{
+    const t = (h.ts||'').slice(11,19);
+    const arrow = h.dir === 'up' ? '▲' : h.dir === 'down' ? '▼' : '–';
+    const ag = h.agree!=null ? ' · ' + Math.round(h.agree*6) + '/6' : '';
+    const sp = h.spot!=null ? ' · ' + h.spot : '';
+    const fl = h.event === 'flipped' ? ' <span class="flip">flip</span>' : '';
+    return `<div class="row"><span class="t">${t}</span>`
+      + `<span class="d ${h.dir}">${arrow}</span>`
+      + `<span class="meta">${h.kind||''} · ${h.strength||''}${ag}${sp}${fl}</span></div>`;
+  }).join('');
+}
+
+function drawStrip(s){
+  const g = s.gex||{}, sp = s.spy||{};
+  const pw = g.put_wall, cw = g.call_wall, zg = g.zero_gamma, spot = s.spot;
+  const el = $('strip'); el.innerHTML = '<div class="track"></div>';
+  if(!pw || !cw || !spot) return;
+  const vw = sp.vwap;
+  const lo = Math.min(pw, cw, spot) - 12, hi = Math.max(pw, cw, spot) + 12;
+  const pos = v => Math.max(0, Math.min(100, ((v - lo)/(hi - lo))*100));
+
+  // markers first
+  const items = [
+    {v: pw, cls: 'pw', label: 'PW ' + pw},
+    {v: zg, cls: 'zg', label: 'Flip ' + (zg?Math.round(zg):'')},
+    {v: cw, cls: 'cw', label: 'CW ' + cw},
+    {v: vw, cls: 'vwap', label: 'VWAP ' + (vw?Math.round(vw):'')},
+  ].filter(i => i.v != null);
+  items.forEach(i => {
+    const m = document.createElement('div');
+    m.className = 'mark ' + i.cls; m.style.left = pos(i.v) + '%';
+    el.appendChild(m);
+  });
+  // spot marker + label (always top row)
+  const sm = document.createElement('div');
+  sm.className = 'mark spot'; sm.style.left = pos(spot) + '%'; el.appendChild(sm);
+  const sl = document.createElement('div');
+  sl.className = 'lbl spot'; sl.style.left = pos(spot) + '%';
+  sl.textContent = spot.toFixed(0); el.appendChild(sl);
+  // wall/flip labels, staggered to two rows when close together
+  items.sort((a,b) => a.v - b.v);
+  let lastPos = -99;
+  items.forEach(i => {
+    const p = pos(i.v);
+    const row = (p - lastPos) < 12 ? 'r1' : 'r0';
+    lastPos = p;
+    const l = document.createElement('div');
+    l.className = 'lbl ' + row; l.style.left = p + '%';
+    l.style.color = i.cls === 'cw' ? 'var(--pos)' : i.cls === 'pw' ? 'var(--neg)'
+      : i.cls === 'vwap' ? '#3ac0d0' : 'var(--warn)';
+    l.textContent = i.label; el.appendChild(l);
+  });
+}
+
+function drawChart(g){
+  const svg = $('chart'); svg.innerHTML='';
+  const rows = (g.by_strike||[]).filter(r=>isFinite(r.net_gex));
+  if(!rows.length) return;
+  const W=1000,H=240,pad=20;
+  const max = Math.max(...rows.map(r=>Math.abs(r.net_gex))) || 1;
+  const bw = (W-2*pad)/rows.length;
+  const y0 = H/2;
+  const ns='http://www.w3.org/2000/svg';
+  const line=(x1,y1,x2,y2,col,dash)=>{const l=document.createElementNS(ns,'line');
+    l.setAttribute('x1',x1);l.setAttribute('y1',y1);l.setAttribute('x2',x2);l.setAttribute('y2',y2);
+    l.setAttribute('stroke',col);l.setAttribute('stroke-width',dash?1.5:1);
+    if(dash)l.setAttribute('stroke-dasharray','4 3');svg.appendChild(l);};
+  line(0,y0,W,y0,'#30363d');
+  rows.forEach((r,i)=>{
+    const x = pad + i*bw;
+    const h = (Math.abs(r.net_gex)/max)*(H/2-pad);
+    const rect=document.createElementNS(ns,'rect');
+    rect.setAttribute('x',x+1);rect.setAttribute('width',Math.max(1,bw-2));
+    rect.setAttribute('y', r.net_gex>=0 ? y0-h : y0);
+    rect.setAttribute('height',h);
+    rect.setAttribute('fill', r.net_gex>=0 ? '#3fb95099' : '#f8514999');
+    const t=document.createElementNS(ns,'title'); t.textContent = r.strike+'  $'+money(r.net_gex);
+    rect.appendChild(t); svg.appendChild(rect);
+  });
+  const xOf = strike => {
+    let best=0,bd=1e9;
+    rows.forEach((r,i)=>{const d=Math.abs(r.strike-strike); if(d<bd){bd=d;best=i;}});
+    return pad + best*bw + bw/2;
+  };
+  if(g.zero_gamma) line(xOf(g.zero_gamma),0,xOf(g.zero_gamma),H,'#d29922',true);
+  if(g.call_wall)  line(xOf(g.call_wall),0,xOf(g.call_wall),H,'#3fb950',false);
+  if(g.put_wall)   line(xOf(g.put_wall),0,xOf(g.put_wall),H,'#f85149',false);
+  if(g.spot)       line(xOf(g.spot),0,xOf(g.spot),H,'#ffffff',false);
+}
+
+function drawFeed(evs){
+  $('feedcount').textContent = evs.length;
+  const tb = $('feed');
+  if(!evs.length){ tb.innerHTML='<tr><td colspan="9" class="empty">no prints yet</td></tr>'; return; }
+  tb.innerHTML = evs.map(e=>{
+    const chips = (e.tags||[]).map(t=>`<span class="chip ${t}">${t}</span>`).join('');
+    const c = (e.strike||0)+' '+(e.type||'').toUpperCase();
+    return `<tr class="${e.direction||''}">
+      <td class="muted">${(e.ts||'').slice(-8)}</td>
+      <td>${c}</td>
+      <td class="muted">${e.dte!=null? e.dte+'d':''}</td>
+      <td class="num">$${money(e.premium||0)}</td>
+      <td class="side ${e.side||''}">${e.side||''}</td>
+      <td>${e.direction||''}</td>
+      <td class="muted">${e.confidence||''}</td>
+      <td class="num">${e.voi_ratio!=null? (isFinite(e.voi_ratio)? e.voi_ratio.toFixed(1):'∞'):''}</td>
+      <td>${chips}</td></tr>`;
+  }).join('');
+}
+
+$('backbtn').addEventListener('click', ()=>{ SELECTED = null; render(window.__last); });
+
+// Streamlit build: no local /state endpoint to poll -- the Python side fetches
+// the Drive-synced JSON and injects it here fresh on every autorefresh rerun.
+window.__last = __PAYLOAD__;
+render(__PAYLOAD__);
+</script>
+</body>
+</html>
