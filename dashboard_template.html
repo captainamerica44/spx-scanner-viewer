@@ -260,7 +260,7 @@ const money = n => {
   return n.toFixed(0);
 };
 
-let SELECTED = null;      // null = grid view; a symbol = deep view
+let SELECTED = __SELECTED__;  // Streamlit build: Python feeds this back in each rerun so the selected ticker survives the 15s autorefresh instead of resetting to the grid
 
 function render(payload){
   // payload may be the legacy flat ticker-state, or {tickers:{SYM:state}, symbols:[...]}

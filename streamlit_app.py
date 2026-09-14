@@ -47,10 +47,25 @@ except Exception as e:                                    # noqa: BLE001
 with open(TEMPLATE_PATH, encoding="utf-8") as fh:
     template = fh.read()
 
+# Ticker selection lives in a native Streamlit widget, not the embedded page's
+# own JS. st_autorefresh reruns this whole script every 15s, which rebuilds
+# and re-injects the entire HTML document into the iframe from scratch -- any
+# state the *page's own* JS was holding (which ticker was selected) resets
+# with it. A widget keyed into st.session_state is what Streamlit actually
+# preserves across reruns, so that's the source of truth: read it here and
+# feed it back in as the page's starting SELECTED value on every rebuild.
+symbols = data.get("symbols") or ([data["symbol"]] if data.get("symbol") else [])
+selected = None
+if len(symbols) > 1:
+    choice = st.radio("Ticker", ["ALL"] + symbols, horizontal=True,
+                       key="selected_ticker", label_visibility="collapsed")
+    selected = None if choice == "ALL" else choice
+
 # JSON is valid JS, except a literal "</script>" inside a string would close
 # the tag early -- escape it before inlining.
 payload_js = json.dumps(data).replace("</", "<\\/")
-html = template.replace("__PAYLOAD__", payload_js)
+selected_js = json.dumps(selected)   # None -> "null", "SPX" -> '"SPX"'
+html = template.replace("__PAYLOAD__", payload_js).replace("__SELECTED__", selected_js)
 
 st.caption(f"Last scanner update: {data.get('ts', '?')} CT  |  page refreshed {time.strftime('%H:%M:%S')}")
 st.components.v1.html(html, height=2400, scrolling=True)
