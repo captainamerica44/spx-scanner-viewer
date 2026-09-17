@@ -154,6 +154,15 @@
     <h2 style="font-size:16px;color:var(--dim);letter-spacing:.5px;margin:4px 0 12px">ALL TICKERS &mdash; click a card for the full view</h2>
     <div class="grid" id="grid"></div>
     <div class="upd" id="grid-upd" style="text-align:left;margin-top:10px"></div>
+
+    <div class="panel" style="margin-top:16px">
+      <h3>Alerts sent today &mdash; every ticker (<span id="grid-alertcount">0</span>)</h3>
+      <div class="muted" style="font-size:12px;margin:-4px 0 10px">click a row to read the full email</div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Time</th><th>Symbol</th><th>Kind</th><th>Subject</th></tr></thead>
+        <tbody id="grid-alertlog"><tr><td colspan="4" class="empty">no alerts sent yet today</td></tr></tbody>
+      </table></div>
+    </div>
   </div>
 
   <div id="deepview">
@@ -187,6 +196,12 @@
       <div class="leanbar-dot" id="leandot"></div>
     </div>
     <div class="leancomps" id="leancomps"></div>
+  </div>
+
+  <div class="panel">
+    <h3>Live price &mdash; <span id="pxbars" class="muted"></span> &middot; walls/flip &middot; signal fires &middot; large prints &middot; 15m opening range</h3>
+    <svg id="pxchart" viewBox="0 0 1000 320" preserveAspectRatio="none"></svg>
+    <div id="pxlegend" class="muted" style="font-size:11px;margin-top:8px"></div>
   </div>
 
   <div class="panel" id="gaugepanel" style="display:none">
@@ -225,12 +240,6 @@
   </div>
 
   <div class="panel">
-    <h3>Live price &mdash; <span id="pxbars" class="muted"></span> &middot; walls/flip &middot; signal fires &middot; large prints &middot; 15m opening range</h3>
-    <svg id="pxchart" viewBox="0 0 1000 320" preserveAspectRatio="none"></svg>
-    <div id="pxlegend" class="muted" style="font-size:11px;margin-top:8px"></div>
-  </div>
-
-  <div class="panel">
     <h3>Net GEX by strike (green = dealer long gamma / dampening, red = short / amplifying)
       &mdash; combined <span id="gexexp" class="muted"></span></h3>
     <div id="gexdte" class="muted" style="font-size:12px;margin-bottom:4px"></div>
@@ -239,12 +248,21 @@
   </div>
 
   <div class="panel">
-    <h3>Large prints — newest first (<span id="feedcount">0</span>)</h3>
+    <h3>Large prints — newest first (<span id="feedcount">0</span>) <span id="feedthresh" class="muted" style="font-size:12px;font-weight:normal"></span></h3>
     <div id="threshinfo" class="muted" style="font-size:12px;margin:-4px 0 10px"></div>
     <div class="tablewrap"><table>
       <thead><tr><th>Time</th><th>Contract</th><th>DTE</th><th class="num">Premium</th>
         <th>Side</th><th>Dir</th><th>Conf</th><th class="num">Vol/OI</th><th>Tags</th></tr></thead>
       <tbody id="feed"><tr><td colspan="9" class="empty">no prints yet</td></tr></tbody>
+    </table></div>
+  </div>
+
+  <div class="panel">
+    <h3>Alerts sent today &mdash; this ticker (<span id="alertcount">0</span>)</h3>
+    <div class="muted" style="font-size:12px;margin:-4px 0 10px">click a row to read the full email</div>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Time</th><th>Kind</th><th>Subject</th></tr></thead>
+      <tbody id="alertlog"><tr><td colspan="3" class="empty">no alerts sent yet today</td></tr></tbody>
     </table></div>
   </div>
   </div><!-- /deepview -->
@@ -260,7 +278,7 @@ const money = n => {
   return n.toFixed(0);
 };
 
-let SELECTED = __SELECTED__;  // Streamlit build: Python feeds this back in each rerun so the selected ticker survives the 15s autorefresh instead of resetting to the grid
+let SELECTED = __SELECTED__;      // null = grid view; a symbol = deep view
 
 function render(payload){
   // payload may be the legacy flat ticker-state, or {tickers:{SYM:state}, symbols:[...]}
@@ -339,6 +357,36 @@ function drawGrid(syms, tickers, payload){
   if(top.age_seconds!=null)
     $('grid-upd').textContent = 'chain ' + Math.round(top.age_seconds) + 's ago · ' + (top.ts||'')
       + (top.vix ? '  ·  VIX ' + top.vix.toFixed(2) : '');
+  drawAlertLog(top.alert_history || [], 'grid-alertlog', 'grid-alertcount', true);
+}
+
+// Alert history: one row per email actually SENT (see alerts.py _log_sent) --
+// click a row to expand the full subject/body inline, same list backs both
+// the unified grid-view feed (showSymbol=true) and each ticker's own
+// page (pre-filtered to that symbol, showSymbol=false).
+function drawAlertLog(rows, tbodyId, countId, showSymbol){
+  const tb = $(tbodyId);
+  if(!tb) return;
+  if(countId) $(countId).textContent = rows.length;
+  const cols = showSymbol ? 4 : 3;
+  if(!rows.length){ tb.innerHTML = `<tr><td colspan="${cols}" class="empty">no alerts sent yet today</td></tr>`; return; }
+  tb.innerHTML = rows.map((r,i)=>{
+    const t = (r.ts||'').slice(11,19);
+    const symCell = showSymbol ? `<td>${r.symbol||''}</td>` : '';
+    return `<tr class="alertrow" data-i="${i}" style="cursor:pointer">
+        <td class="muted">${t}</td>${symCell}
+        <td class="muted">${r.kind||''}</td>
+        <td>${r.subject||''}</td></tr>
+      <tr class="alertbody" data-i="${i}" hidden><td colspan="${cols}">
+        <pre style="white-space:pre-wrap;font-family:inherit;font-size:12px;color:var(--dim);margin:0;padding:8px 0">${(r.body||'').replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}</pre>
+      </td></tr>`;
+  }).join('');
+  tb.querySelectorAll('.alertrow').forEach(row=>{
+    row.addEventListener('click', ()=>{
+      const body = tb.querySelector(`.alertbody[data-i="${row.dataset.i}"]`);
+      if(body) body.hidden = !body.hidden;
+    });
+  });
 }
 
 let _barKey = '';
@@ -480,7 +528,18 @@ function renderTicker(s){
   }
 
   drawStrip(s); drawChart(g); drawPriceChart(s);
-  drawFeed(s.recent_events || []);
+  // "Large prints" is the whole day's genuinely-large activity (day_large_prints,
+  // filtered to this ticker's display_print_min_usd), NOT s.recent_events --
+  // that's a 40-deep catch-all of every logged print of any size, so a busy
+  // morning can push real whales out of it before the table ever shows them.
+  const dispMin = s.display_print_min_usd != null ? s.display_print_min_usd : 0;
+  const bigPrints = (s.day_large_prints || []).filter(p => (p.premium||0) >= dispMin)
+    .slice().sort((a,b) => (b.ts||'').localeCompare(a.ts||''));
+  $('feedthresh').textContent = dispMin ? `showing prints ≥ $${money(dispMin)}` : '';
+  drawFeed(bigPrints);
+
+  const myAlerts = ((s.__top || {}).alert_history || []).filter(r => r.symbol === s.symbol);
+  drawAlertLog(myAlerts, 'alertlog', 'alertcount', false);
 }
 
 function drawPriceChart(s){
@@ -841,8 +900,6 @@ function drawFeed(evs){
 
 $('backbtn').addEventListener('click', ()=>{ SELECTED = null; render(window.__last); });
 
-// Streamlit build: no local /state endpoint to poll -- the Python side fetches
-// the Drive-synced JSON and injects it here fresh on every autorefresh rerun.
 window.__last = __PAYLOAD__;
 render(__PAYLOAD__);
 </script>

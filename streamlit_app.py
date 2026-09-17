@@ -54,11 +54,62 @@ with open(TEMPLATE_PATH, encoding="utf-8") as fh:
 # with it. A widget keyed into st.session_state is what Streamlit actually
 # preserves across reruns, so that's the source of truth: read it here and
 # feed it back in as the page's starting SELECTED value on every rebuild.
+#
+# The radio itself is reskinned via CSS below to look like dashboard.html's
+# ticker-bar boxes (symbol + regime letter + lean value, bordered box,
+# highlighted border when selected) -- purely cosmetic, the underlying
+# mechanism is still the same session_state-backed st.radio that survives
+# the autorefresh. This targets Streamlit's current BaseWeb radio markup
+# (label[data-baseweb="radio"]), which is NOT a public/stable API -- if a
+# future Streamlit upgrade changes that markup, the boxes may need re-tuning
+# (it'll just fall back to looking like a plain radio list, still functional).
 symbols = data.get("symbols") or ([data["symbol"]] if data.get("symbol") else [])
+tickers = data.get("tickers") or {}
 selected = None
+
 if len(symbols) > 1:
-    choice = st.radio("Ticker", ["ALL"] + symbols, horizontal=True,
-                       key="selected_ticker", label_visibility="collapsed")
+    options = ["ALL"] + symbols
+    labels = {"ALL": "ALL"}
+    directions = {"ALL": "flat"}
+    for sym in symbols:
+        t = tickers.get(sym) or {}
+        gex = t.get("gex") or {}
+        lean = t.get("lean") or {}
+        regime_letter = (gex.get("regime") or "?")[:1]
+        sc = lean.get("score_smoothed") if lean.get("score_smoothed") is not None else lean.get("score")
+        lean_txt = f"{sc:+.1f}" if sc is not None else "--"
+        labels[sym] = f"{sym}  {regime_letter}  {lean_txt}"
+        directions[sym] = "up" if (sc or 0) > 0.5 else "down" if (sc or 0) < -0.5 else "flat"
+
+    dir_css = "\n".join(
+        f'div[data-testid="stRadio"] label[data-baseweb="radio"]:nth-of-type({i}) '
+        f'{{ --box-accent: {"#3fb950" if directions[opt]=="up" else "#f85149" if directions[opt]=="down" else "#8b949e"}; }}'
+        for i, opt in enumerate(options, start=1)
+    )
+    st.markdown(f"""
+    <style>
+      div[data-testid="stRadio"] > div {{ gap: 6px; flex-wrap: wrap; }}
+      div[data-testid="stRadio"] label[data-baseweb="radio"] {{
+        background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+        padding: 6px 14px; margin: 0 !important; transition: border-color .15s;
+      }}
+      div[data-testid="stRadio"] label[data-baseweb="radio"] > div:first-child {{ display: none; }}
+      div[data-testid="stRadio"] label[data-baseweb="radio"] div[data-testid="stMarkdownContainer"] p {{
+        color: #8b949e; font: 13px/1.2 -apple-system,Segoe UI,Roboto,sans-serif;
+      }}
+      div[data-testid="stRadio"] label[data-baseweb="radio"]:has(input:checked) {{
+        border-color: #58a6ff; background: #1c2430;
+      }}
+      div[data-testid="stRadio"] label[data-baseweb="radio"]:has(input:checked) div[data-testid="stMarkdownContainer"] p {{
+        color: #e6edf3;
+      }}
+      div[data-testid="stRadio"] label[data-baseweb="radio"] {{ border-left: 3px solid var(--box-accent, #30363d); }}
+      {dir_css}
+    </style>
+    """, unsafe_allow_html=True)
+
+    choice = st.radio("Ticker", options, format_func=lambda o: labels.get(o, o),
+                       horizontal=True, key="selected_ticker", label_visibility="collapsed")
     selected = None if choice == "ALL" else choice
 
 # JSON is valid JS, except a literal "</script>" inside a string would close
