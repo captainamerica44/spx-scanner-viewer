@@ -81,29 +81,35 @@ if len(symbols) > 1:
         labels[sym] = f"{sym}  {regime_letter}  {lean_txt}"
         directions[sym] = "up" if (sc or 0) > 0.5 else "down" if (sc or 0) < -0.5 else "flat"
 
+    # Real markup verified live against the deployed app (Streamlit 1.62):
+    # each option is <label data-testid="stRadioOption" data-selected="true|false">,
+    # NOT data-baseweb="radio" (that was a guess from an older version and
+    # silently didn't match anything -- confirmed by inspecting the live DOM
+    # before shipping this). The native input sits in a visually-hidden
+    # <span>; the visible circle is the first *div* child.
     dir_css = "\n".join(
-        f'div[data-testid="stRadio"] label[data-baseweb="radio"]:nth-of-type({i}) '
+        f'div[data-testid="stRadio"] label[data-testid="stRadioOption"]:nth-of-type({i}) '
         f'{{ --box-accent: {"#3fb950" if directions[opt]=="up" else "#f85149" if directions[opt]=="down" else "#8b949e"}; }}'
         for i, opt in enumerate(options, start=1)
     )
     st.markdown(f"""
     <style>
       div[data-testid="stRadio"] > div {{ gap: 6px; flex-wrap: wrap; }}
-      div[data-testid="stRadio"] label[data-baseweb="radio"] {{
+      div[data-testid="stRadio"] label[data-testid="stRadioOption"] {{
         background: #161b22; border: 1px solid #30363d; border-radius: 8px;
         padding: 6px 14px; margin: 0 !important; transition: border-color .15s;
       }}
-      div[data-testid="stRadio"] label[data-baseweb="radio"] > div:first-child {{ display: none; }}
-      div[data-testid="stRadio"] label[data-baseweb="radio"] div[data-testid="stMarkdownContainer"] p {{
+      div[data-testid="stRadio"] label[data-testid="stRadioOption"] > div:first-of-type {{ display: none; }}
+      div[data-testid="stRadio"] label[data-testid="stRadioOption"] div[data-testid="stMarkdownContainer"] p {{
         color: #8b949e; font: 13px/1.2 -apple-system,Segoe UI,Roboto,sans-serif;
       }}
-      div[data-testid="stRadio"] label[data-baseweb="radio"]:has(input:checked) {{
+      div[data-testid="stRadio"] label[data-testid="stRadioOption"][data-selected="true"] {{
         border-color: #58a6ff; background: #1c2430;
       }}
-      div[data-testid="stRadio"] label[data-baseweb="radio"]:has(input:checked) div[data-testid="stMarkdownContainer"] p {{
+      div[data-testid="stRadio"] label[data-testid="stRadioOption"][data-selected="true"] div[data-testid="stMarkdownContainer"] p {{
         color: #e6edf3;
       }}
-      div[data-testid="stRadio"] label[data-baseweb="radio"] {{ border-left: 3px solid var(--box-accent, #30363d); }}
+      div[data-testid="stRadio"] label[data-testid="stRadioOption"] {{ border-left: 3px solid var(--box-accent, #30363d); }}
       {dir_css}
     </style>
     """, unsafe_allow_html=True)
