@@ -86,7 +86,10 @@ if len(symbols) > 1:
     # NOT data-baseweb="radio" (that was a guess from an older version and
     # silently didn't match anything -- confirmed by inspecting the live DOM
     # before shipping this). The native input sits in a visually-hidden
-    # <span>; the visible circle is the first *div* child.
+    # <span>; the circle indicator AND the label text share one wrapper div
+    # (<div><div>circle</div><div data-testid="stMarkdownContainer">text</div></div>),
+    # so hiding the circle needs one more level of nesting than hiding the
+    # whole wrapper -- also caught by checking the live DOM, not guessed.
     dir_css = "\n".join(
         f'div[data-testid="stRadio"] label[data-testid="stRadioOption"]:nth-of-type({i}) '
         f'{{ --box-accent: {"#3fb950" if directions[opt]=="up" else "#f85149" if directions[opt]=="down" else "#8b949e"}; }}'
@@ -99,7 +102,7 @@ if len(symbols) > 1:
         background: #161b22; border: 1px solid #30363d; border-radius: 8px;
         padding: 6px 14px; margin: 0 !important; transition: border-color .15s;
       }}
-      div[data-testid="stRadio"] label[data-testid="stRadioOption"] > div:first-of-type {{ display: none; }}
+      div[data-testid="stRadio"] label[data-testid="stRadioOption"] > div > div:first-child {{ display: none; }}
       div[data-testid="stRadio"] label[data-testid="stRadioOption"] div[data-testid="stMarkdownContainer"] p {{
         color: #8b949e; font: 13px/1.2 -apple-system,Segoe UI,Roboto,sans-serif;
       }}
