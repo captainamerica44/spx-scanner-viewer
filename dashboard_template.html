@@ -280,6 +280,30 @@ const money = n => {
 
 let SELECTED = __SELECTED__;      // null = grid view; a symbol = deep view
 
+// Every in-page navigation goes through here. When this page is embedded in
+// the Streamlit viewer, that app rebuilds the whole document every 15s from
+// ITS OWN ticker selector -- so a click on a card / ticker button / "all
+// tickers" that only changes SELECTED here got silently reverted to the
+// grid on the next refresh. Mirror the choice into the parent's selector
+// (same-origin, so the parent DOM is reachable) so both agree.
+function selectTicker(sym){
+  SELECTED = sym;
+  try{
+    if(window.parent && window.parent !== window){
+      const want = sym == null ? 'ALL' : sym;
+      const opts = window.parent.document.querySelectorAll('label[data-testid="stRadioOption"]');
+      for(const o of opts){
+        const t = (o.textContent||'').trim();
+        if(t === want || t.split(/\s+/)[0] === want){
+          if(o.getAttribute('data-selected') !== 'true') o.click();
+          break;
+        }
+      }
+    }
+  }catch(e){ /* standalone (local dashboard) or blocked -- nothing to sync */ }
+  render(window.__last);
+}
+
 function render(payload){
   // payload may be the legacy flat ticker-state, or {tickers:{SYM:state}, symbols:[...]}
   let syms = payload && payload.symbols;
@@ -351,7 +375,7 @@ function drawGrid(syms, tickers, payload){
     </div>`;
   }).join('');
   g.querySelectorAll('.gcard').forEach(c=>c.addEventListener('click',()=>{
-    SELECTED = c.dataset.sym; render(window.__last || payload);
+    selectTicker(c.dataset.sym);
   }));
   const top = payload || {};
   if(top.age_seconds!=null)
@@ -364,27 +388,45 @@ function drawGrid(syms, tickers, payload){
 // click a row to expand the full subject/body inline, same list backs both
 // the unified grid-view feed (showSymbol=true) and each ticker's own
 // page (pre-filtered to that symbol, showSymbol=false).
+// Which alert rows the user has expanded -- survives the 15s rebuild of the
+// whole document (Streamlit) and the 4s innerHTML rebuild (local dashboard).
+function _openAlerts(){
+  try{ return new Set(JSON.parse(sessionStorage.getItem('openAlerts')||'[]')); }
+  catch(e){ return window.__openAlertsMem || new Set(); }
+}
+function _setAlertOpen(key, open){
+  const set = _openAlerts();
+  open ? set.add(key) : set.delete(key);
+  window.__openAlertsMem = set;
+  try{ sessionStorage.setItem('openAlerts', JSON.stringify([...set])); }catch(e){}
+}
+
 function drawAlertLog(rows, tbodyId, countId, showSymbol){
   const tb = $(tbodyId);
   if(!tb) return;
   if(countId) $(countId).textContent = rows.length;
   const cols = showSymbol ? 4 : 3;
   if(!rows.length){ tb.innerHTML = `<tr><td colspan="${cols}" class="empty">no alerts sent yet today</td></tr>`; return; }
+  const openSet = _openAlerts();
   tb.innerHTML = rows.map((r,i)=>{
     const t = (r.ts||'').slice(11,19);
+    const isOpen = openSet.has((r.ts||'')+'|'+(r.subject||''));
     const symCell = showSymbol ? `<td>${r.symbol||''}</td>` : '';
     return `<tr class="alertrow" data-i="${i}" style="cursor:pointer">
         <td class="muted">${t}</td>${symCell}
         <td class="muted">${r.kind||''}</td>
         <td>${r.subject||''}</td></tr>
-      <tr class="alertbody" data-i="${i}" hidden><td colspan="${cols}">
+      <tr class="alertbody" data-i="${i}" ${isOpen?'':'hidden'}><td colspan="${cols}">
         <pre style="white-space:pre-wrap;font-family:inherit;font-size:12px;color:var(--dim);margin:0;padding:8px 0">${(r.body||'').replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}</pre>
       </td></tr>`;
   }).join('');
   tb.querySelectorAll('.alertrow').forEach(row=>{
     row.addEventListener('click', ()=>{
       const body = tb.querySelector(`.alertbody[data-i="${row.dataset.i}"]`);
-      if(body) body.hidden = !body.hidden;
+      if(!body) return;
+      body.hidden = !body.hidden;
+      const r = rows[+row.dataset.i] || {};
+      _setAlertOpen((r.ts||'')+'|'+(r.subject||''), !body.hidden);
     });
   });
 }
@@ -399,7 +441,7 @@ function drawTickerBar(syms, tickers, payload){
       `<button data-sym="${sym}"><span class="nm">${sym}</span>`
       + `<span class="rg"></span><span class="sd"></span></button>`).join('');
     bar.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
-      SELECTED = b.dataset.sym; render(window.__last || payload);
+      selectTicker(b.dataset.sym);
     }));
   }
   bar.querySelectorAll('button').forEach(b=>{
@@ -898,7 +940,7 @@ function drawFeed(evs){
   }).join('');
 }
 
-$('backbtn').addEventListener('click', ()=>{ SELECTED = null; render(window.__last); });
+$('backbtn').addEventListener('click', ()=>{ selectTicker(null); });
 
 window.__last = __PAYLOAD__;
 render(__PAYLOAD__);
