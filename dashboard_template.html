@@ -321,12 +321,14 @@ function render(payload){
 
   if(showGrid){
     drawGrid(syms, tickers, payload);
+    restoreScroll();
     return;
   }
   if(SELECTED == null || !tickers[SELECTED]) SELECTED = (syms && syms[0]) || Object.keys(tickers)[0];
   const s = tickers[SELECTED];
   s.__top = payload;                  // stash top-level for freshness
   renderTicker(s);
+  restoreScroll();
 }
 
 function gaugeMiniSVG(gg){
@@ -941,6 +943,93 @@ function drawFeed(evs){
 }
 
 $('backbtn').addEventListener('click', ()=>{ selectTicker(null); });
+
+// --- keep your place across the Streamlit viewer's 15s rebuild ------------
+// In the viewer this page lives in an iframe with its own scrollbar
+// (components.v1.html(..., height=2400, scrolling=True)) and every refresh
+// THROWS THAT IFRAME AWAY and builds a new one. A new iframe always starts
+// at the top, so whatever you were reading jumps off screen. Streamlit has
+// no setting for this -- it is a long-standing known limitation with no
+// official fix, and the community answer is exactly this: save the position
+// yourself and put it back. The iframe is same-origin with the parent tab,
+// so sessionStorage OUTLIVES the document that gets destroyed.
+//
+// Two scrollers can be in play: this document (inner) and, when the page is
+// embedded, Streamlit's own main container (outer). Both are saved. On the
+// local dashboard the outer lookup just throws and is ignored.
+const SCROLL_KEY = 'dashScroll';
+let _scrollRestored = false;   // restore has been STARTED for this document
+let _restoreDone = false;      // ...and finished; saving stays frozen until it is
+
+function _outerScroller(){
+  try{
+    if(window.parent && window.parent !== window){
+      return window.parent.document.querySelector('[data-testid="stMain"]');
+    }
+  }catch(e){ /* cross-origin or standalone */ }
+  return null;
+}
+
+function _saveScroll(){
+  try{
+    const outer = _outerScroller();
+    sessionStorage.setItem(SCROLL_KEY, JSON.stringify({
+      inner: document.scrollingElement ? document.scrollingElement.scrollTop : 0,
+      outer: outer ? outer.scrollTop : 0,
+    }));
+  }catch(e){ /* storage blocked -- the page still works, it just forgets */ }
+}
+
+// Called at the end of render(): only then is the page tall enough to scroll
+// to the saved offset. Runs once per document; later ticks must not yank the
+// page while it is being read.
+function restoreScroll(){
+  if(_scrollRestored) return;
+  _scrollRestored = true;
+  let want;
+  try{ want = JSON.parse(sessionStorage.getItem(SCROLL_KEY) || 'null'); }
+  catch(e){ _restoreDone = true; return; }
+  // nothing to put back (first visit) -- unfreeze saving immediately
+  if(!want || (!want.inner && !want.outer)){ _restoreDone = true; return; }
+  // setTimeout, NOT requestAnimationFrame: verified 2026-09-22 that rAF never
+  // fires inside this embedded iframe (the callback simply never ran), which
+  // would leave the restore permanently pending. Timers do run.
+  let tries = 0;
+  const go = ()=>{
+    const el = document.scrollingElement;
+    const outer = _outerScroller();
+    if(el && want.inner) el.scrollTop = want.inner;   // clamps itself if short
+    if(outer && want.outer) outer.scrollTop = want.outer;
+    const innerOk = !want.inner || !el || el.scrollTop >= want.inner - 2;
+    const outerOk = !want.outer || !outer || outer.scrollTop >= want.outer - 2;
+    if((innerOk && outerOk) || ++tries >= 40){       // give up after ~2s
+      _restoreDone = true;                           // only now may saving start
+      return;
+    }
+    setTimeout(go, 50);                              // content is still growing
+  };
+  go();
+}
+
+// Polled, NOT a 'scroll' listener. Verified 2026-09-22 against a local replica
+// of the viewer (srcdoc iframe, scrolling on, rebuilt on a timer): scrollTop
+// changed correctly while NO scroll event fired on window, document or body,
+// so a listener-based save would have silently never run. A poll reads the
+// value directly and cannot be missed. Writes only on a change.
+let _lastSaved = '';
+setInterval(()=>{
+  try{
+    // Do not save before the restore has finished. A rebuilt document starts
+    // at scrollTop 0, so an eager poll would overwrite the stored position
+    // with 0 and destroy the very thing it is meant to preserve -- observed
+    // in testing on 2026-09-22 before this guard existed.
+    if(!_restoreDone) return;
+    const el = document.scrollingElement;
+    const outer = _outerScroller();
+    const now = (el ? el.scrollTop : 0) + '/' + (outer ? outer.scrollTop : 0);
+    if(now !== _lastSaved){ _lastSaved = now; _saveScroll(); }
+  }catch(e){ /* never let the watcher kill the page */ }
+}, 400);
 
 window.__last = __PAYLOAD__;
 render(__PAYLOAD__);
