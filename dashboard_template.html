@@ -337,6 +337,7 @@ function render(payload){
 
   if(showGrid){
     drawGrid(syms, tickers, payload);
+    fitFrame();
     restoreScroll();
     return;
   }
@@ -344,6 +345,7 @@ function render(payload){
   const s = tickers[SELECTED];
   s.__top = payload;                  // stash top-level for freshness
   renderTicker(s);
+  fitFrame();
   restoreScroll();
 }
 
@@ -959,6 +961,39 @@ function drawFeed(evs){
 }
 
 $('backbtn').addEventListener('click', ()=>{ selectTicker(null); });
+
+// --- when embedded, grow the frame to fit instead of scrolling inside it --
+// The viewer used to give this page a fixed 2400px frame with its own
+// scrollbar. On a phone that means TWO nested scrollers: a drag over the page
+// scrolls the inner one until it runs out, then the outer one, so the top of
+// the page kept sliding back under Streamlit's header bar and the first row
+// of tickers could not be reached (reported 2026-09-22).
+//
+// Same origin, so the page can size its own frame: make it as tall as the
+// content and the inner scrollbar disappears, leaving ONE scroller -- the
+// ordinary page scroll, which phones handle properly.
+function fitFrame(){
+  try{
+    const fr = window.frameElement;
+    if(!fr) return;                                   // local dashboard: no frame
+    // Measure the CONTENT, not the document: documentElement.scrollHeight can
+    // never report less than the frame's own height, so using it made the
+    // frame a ratchet that only grew -- switching from a ticker back to the
+    // grid left a screenful of dead space to scroll through.
+    const content = document.querySelector('.wrap') || document.body;
+    const h = Math.ceil(content.getBoundingClientRect().height) + 24;
+    if(h && Math.abs(parseInt(fr.style.height || 0, 10) - h) > 8){
+      fr.style.height = h + 'px';
+      fr.setAttribute('height', h);
+    }
+  }catch(e){ /* cross-origin: leave the frame alone */ }
+}
+try{
+  if(window.frameElement && window.ResizeObserver){
+    // content changes height when you open a ticker or the tables grow
+    new ResizeObserver(fitFrame).observe(document.documentElement);
+  }
+}catch(e){ /* observer unavailable -- render() still calls fitFrame */ }
 
 // --- keep your place across the Streamlit viewer's 15s rebuild ------------
 // In the viewer this page lives in an iframe with its own scrollbar

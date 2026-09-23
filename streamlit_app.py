@@ -63,7 +63,7 @@ st.set_page_config(page_title="SPX Scanner", layout="wide")
 TEMPLATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                              "dashboard_template.html")
 REFRESH_SECONDS = 15
-DASHBOARD_HEIGHT = 2400
+DASHBOARD_HEIGHT = 2400        # initial only; the page resizes its own frame
 
 
 def _source() -> str | None:
@@ -102,15 +102,26 @@ except Exception as e:                                    # noqa: BLE001
                "Waiting for the scanner to publish -- this is expected before it's running.")
     st.stop()
 
+# Streamlit's own chrome fights this page on a phone: the header sits ABSOLUTE
+# over the top ~60px, so the dashboard's first row of tickers ended up hidden
+# behind it, and the default container padding wastes width that a 375px
+# screen does not have. The dashboard is the whole app here, so the chrome
+# goes. (Reported 2026-09-22: "the top of the page is cut off, I can't see
+# SPX QQQ or USO".)
 st.markdown("""<style>
-  /* the dashboard brings its own padding; the feed is invisible plumbing */
+  header[data-testid="stHeader"], [data-testid="stToolbar"]{display:none !important}
   .stMain .block-container{padding:0 !important;max-width:100% !important}
   .stMain iframe[height="1"]{display:block;height:1px !important;border:0}
+  .stAppDeployButton, [data-testid="stDecoration"]{display:none !important}
 </style>""", unsafe_allow_html=True)
 
 # ---- the dashboard itself: drawn once, then never re-rendered --------------
 with open(TEMPLATE_PATH, encoding="utf-8") as fh:
     template = fh.read()
+# DASHBOARD_HEIGHT is only the starting size. The page measures its own
+# content and resizes this frame from the inside (fitFrame() in the template),
+# so there is no inner scrollbar and the phone scrolls the page itself --
+# one scroller, not two nested ones.
 st.iframe(template.replace("__PAYLOAD__", _js_payload(first)),
           height=DASHBOARD_HEIGHT)
 
