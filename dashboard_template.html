@@ -659,14 +659,32 @@ function drawPriceChart(s){
     svg.appendChild(t);
   }
 
-  // opening range: first 15 minutes of the session
+  // Opening range: the 08:30-08:45 CT clock window -- the same half-open
+  // window or_ema_backtest.py and orb_check.py use, so the chart and the
+  // study agree on what "the OR" is.
+  //
+  // This used to be a bar COUNT: Math.round(15 / stepMin). With the scanner's
+  // 2-minute bars that is Math.round(7.5) = 8 bars = 16 minutes, and the
+  // label duly read "OR 16m". Choosing bars by the clock instead of by
+  // arithmetic keeps it a 15-minute range whatever the bar size is.
+  //
+  // The 2-minute bar starting at 08:44 still carries a minute past 08:45. It
+  // is kept on purpose: the study counts every reading before 08:45,
+  // including ones inside that bar, so dropping it would hide data the study
+  // can see.
   const stepMin = Math.max(1, Math.round((hhmmss(timeOf(candles[1].t)) - hhmmss(timeOf(candles[0].t))) / 60));
-  const orBars = Math.min(n, Math.max(1, Math.round(15 / stepMin)));
-  const orSlice = candles.slice(0, orBars);
+  const OR_START = 8 * 3600 + 30 * 60, OR_MIN = 15;
+  let orSlice = candles.filter(c => {
+    const t = hhmmss(timeOf(c.t));
+    return t >= OR_START && t < OR_START + OR_MIN * 60;
+  });
+  if (!orSlice.length) {           // chart doesn't reach the open -- fall back
+    orSlice = candles.slice(0, Math.min(n, Math.max(1, Math.floor(OR_MIN / stepMin))));
+  }
   const orHi = Math.max(...orSlice.map(c => c.h)), orLo = Math.min(...orSlice.map(c => c.l));
   svg.appendChild(el('rect', {x: padL, y: yOf(orHi), width: innerW, height: Math.max(1, yOf(orLo) - yOf(orHi)), fill: '#58a6ff', opacity: 0.07}));
   [orHi, orLo].forEach(v => svg.appendChild(el('line', {x1: padL, y1: yOf(v), x2: W - padR, y2: yOf(v), stroke: '#58a6ff', 'stroke-width': 1, 'stroke-dasharray': '3 3'})));
-  const orLbl = el('text', {x: padL + 4, y: yOf(orHi) - 3, fill: '#58a6ff', 'font-size': 10}); orLbl.textContent = 'OR ' + orBars * stepMin + 'm';
+  const orLbl = el('text', {x: padL + 4, y: yOf(orHi) - 3, fill: '#58a6ff', 'font-size': 10}); orLbl.textContent = 'OR ' + OR_MIN + 'm';
   svg.appendChild(orLbl);
 
   // walls + zero-gamma flip (current-cycle levels, flat across the session)
