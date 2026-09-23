@@ -278,7 +278,7 @@ const money = n => {
   return n.toFixed(0);
 };
 
-let SELECTED = __SELECTED__;      // null = grid view; a symbol = deep view
+let SELECTED = null;      // null = grid view; a symbol = deep view
 
 // Every in-page navigation goes through here. When this page is embedded in
 // the Streamlit viewer, that app rebuilds the whole document every 15s from
@@ -304,7 +304,23 @@ function selectTicker(sym){
   render(window.__last);
 }
 
+let LAST_GOOD = null;    // the most recent payload that actually carried tickers
+
 function render(payload){
+  // Outside 8:30-15:00 the scanner publishes a bare {"status":"market closed"}
+  // with NO tickers. Rendering that threw the page back to the home grid (or
+  // into an empty single-ticker view) and lost whatever was being looked at --
+  // the "it sometimes sends me back to all the scanners" complaint. Once real
+  // data has been seen, ignore these: keep the last good view on screen and
+  // let the normal freshness indicator age it.
+  if(payload && !payload.tickers && LAST_GOOD){
+    const el = $('upd');
+    if(el) el.innerHTML = '<span class="stale">market closed &mdash; last update '
+      + (LAST_GOOD.ts || '') + '</span>';
+    return;
+  }
+  if(payload && payload.tickers) LAST_GOOD = payload;
+
   // payload may be the legacy flat ticker-state, or {tickers:{SYM:state}, symbols:[...]}
   let syms = payload && payload.symbols;
   let tickers = payload && payload.tickers;
@@ -1031,8 +1047,14 @@ setInterval(()=>{
   }catch(e){ /* never let the watcher kill the page */ }
 }, 400);
 
-window.__last = __PAYLOAD__;
-render(__PAYLOAD__);
+// --- viewer entry point ---------------------------------------------------
+// This page is rendered ONCE by streamlit_app.py and never rebuilt. Its feed
+// fragment reruns every 15s and calls this with the new state, so the numbers
+// change without the document (or your scroll position, or the ticker you
+// have open) being destroyed. The local dashboard polls /state instead; both
+// end up calling the same render().
+window.applyState = function(p){ window.__last = p; render(p); };
+applyState(__PAYLOAD__);
 </script>
 </body>
 </html>

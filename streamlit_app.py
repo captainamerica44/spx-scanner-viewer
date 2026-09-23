@@ -3,129 +3,156 @@ SPX scanner viewer -- Streamlit Cloud front end.
 
 Data flow: the scanner (running on the home PC) writes its dashboard state to
 a JSON file inside a Google Drive-synced folder every cycle. Drive's own sync
-uploads it. This app fetches that file's public direct-download link on every
-autorefresh, then renders it using the *same* chart code as the local
-dashboard (dashboard_template.html is a copy of dashboard.html with its
-fetch('/state') polling loop swapped for a value injected from Python) --
-no chart logic is duplicated or reimplemented here.
+uploads it. This app reads that file and renders it using the *same* chart
+code as the local dashboard (dashboard_template.html is a copy of
+dashboard.html with its fetch('/state') polling loop swapped for an
+applyState() entry point) -- no chart logic is duplicated or reimplemented.
+
+HOW THE REFRESH WORKS (and why it is not the obvious thing)
+
+The obvious thing -- st_autorefresh rerunning the whole script every 15s --
+is what this app used to do, and it made the page hard to actually read: a
+rerun rebuilds the component's iframe from scratch, so every 15 seconds the
+document being read was destroyed and replaced. Scroll position, the ticker
+that was open, expanded alert rows: all gone. That is a known Streamlit
+limitation with no official fix (streamlit/streamlit#9002 and years of forum
+threads); an embedded page cannot opt out of being re-rendered.
+
+So the dashboard is no longer re-rendered at all. It is drawn ONCE, and a
+separate, invisible fragment does the refreshing:
+
+    dashboard iframe  (height 2400, rendered once, never touched again)
+    feed iframe       (1px, inside @st.fragment(run_every=15))
+
+A fragment rerun re-executes ONLY that fragment and leaves the rest of the
+page untouched -- that is what fragments are for. So every 15s just the tiny
+feed is rebuilt. Its script reaches into the dashboard's iframe (same origin,
+so this is allowed) and calls applyState(newData), which updates the numbers
+in place without rebuilding anything.
+
+The page therefore behaves like a real scanner: it stays put and the numbers
+move. Ticker selection is handled by the page's own ticker bar again, not by
+a Streamlit radio, because the page's own JS state now survives -- which is
+also why the radio and its CSS reskin are gone.
+
+Why not let the browser fetch the JSON itself, and skip Python? Google does
+not allow it. Tested 2026-09-22 from a browser: drive.google.com/uc and
+drive.usercontent.google.com both fail CORS outright, and the Drive v3 API
+answers 403 without an API key -- which would mean a Google credential
+sitting in public page source. Fetching server-side has none of those
+problems.
 
 Secrets required (this app's Settings -> Secrets on Streamlit Cloud):
     DRIVE_STATE_URL = "https://drive.google.com/uc?export=download&id=<FILE_ID>"
 
 <FILE_ID> comes from the Drive share link for state.json once the scanner has
 created it (Share -> Anyone with the link -> Viewer -> copy link -- the ID is
-the long string between "/d/" and "/view" in that link).
+the long string between "/d/" and "/view" in that link). A plain filesystem
+path also works, which is handy for running this viewer on the home PC
+straight against the synced folder.
 """
 
 import json
 import os
-import time
 
 import requests
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="SPX Scanner", layout="wide")
-st_autorefresh(interval=15_000, key="refresh")
 
-TEMPLATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard_template.html")
+TEMPLATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "dashboard_template.html")
+REFRESH_SECONDS = 15
+DASHBOARD_HEIGHT = 2400
 
-url = st.secrets.get("DRIVE_STATE_URL")
-if not url:
+
+def _source() -> str | None:
+    try:
+        src = st.secrets.get("DRIVE_STATE_URL")
+    except Exception:                                     # noqa: BLE001
+        src = None                                        # no secrets.toml at all
+    return src or os.environ.get("DRIVE_STATE_URL")
+
+
+def _load(src: str) -> dict:
+    """The scanner's state, from Drive over HTTP or from a local path."""
+    if src.lower().startswith(("http://", "https://")):
+        resp = requests.get(src, timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+    with open(src, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def _js_payload(data: dict) -> str:
+    # JSON is valid JS, except a literal "</script>" inside a string would
+    # close the tag early -- escape it before inlining.
+    return json.dumps(data).replace("</", "<\\/")
+
+
+src = _source()
+if not src:
     st.error("DRIVE_STATE_URL isn't set yet. Add it under this app's Settings -> Secrets.")
     st.stop()
 
 try:
-    resp = requests.get(url, timeout=10)
-    resp.raise_for_status()
-    data = resp.json()
+    first = _load(src)
 except Exception as e:                                    # noqa: BLE001
     st.warning(f"Couldn't load live data yet ({type(e).__name__}: {e}). "
                "Waiting for the scanner to publish -- this is expected before it's running.")
     st.stop()
 
+st.markdown("""<style>
+  /* the dashboard brings its own padding; the feed is invisible plumbing */
+  .stMain .block-container{padding:0 !important;max-width:100% !important}
+  .stMain iframe[height="1"]{display:block;height:1px !important;border:0}
+</style>""", unsafe_allow_html=True)
+
+# ---- the dashboard itself: drawn once, then never re-rendered --------------
 with open(TEMPLATE_PATH, encoding="utf-8") as fh:
     template = fh.read()
+st.iframe(template.replace("__PAYLOAD__", _js_payload(first)),
+          height=DASHBOARD_HEIGHT)
 
-# Ticker selection lives in a native Streamlit widget, not the embedded page's
-# own JS. st_autorefresh reruns this whole script every 15s, which rebuilds
-# and re-injects the entire HTML document into the iframe from scratch -- any
-# state the *page's own* JS was holding (which ticker was selected) resets
-# with it. A widget keyed into st.session_state is what Streamlit actually
-# preserves across reruns, so that's the source of truth: read it here and
-# feed it back in as the page's starting SELECTED value on every rebuild.
-#
-# The radio itself is reskinned via CSS below to look like dashboard.html's
-# ticker-bar boxes (symbol + regime letter + lean value, bordered box,
-# highlighted border when selected) -- purely cosmetic, the underlying
-# mechanism is still the same session_state-backed st.radio that survives
-# the autorefresh. This targets Streamlit's current BaseWeb radio markup
-# (label[data-baseweb="radio"]), which is NOT a public/stable API -- if a
-# future Streamlit upgrade changes that markup, the boxes may need re-tuning
-# (it'll just fall back to looking like a plain radio list, still functional).
-symbols = data.get("symbols") or ([data["symbol"]] if data.get("symbol") else [])
-tickers = data.get("tickers") or {}
-selected = None
 
-if len(symbols) > 1:
-    options = ["ALL"] + symbols
-    labels = {"ALL": "ALL"}
-    directions = {"ALL": "flat"}
-    for sym in symbols:
-        t = tickers.get(sym) or {}
-        gex = t.get("gex") or {}
-        lean = t.get("lean") or {}
-        regime_letter = (gex.get("regime") or "?")[:1]
-        sc = lean.get("score_smoothed") if lean.get("score_smoothed") is not None else lean.get("score")
-        lean_txt = f"{sc:+.1f}" if sc is not None else "--"
-        labels[sym] = f"{sym}  {regime_letter}  {lean_txt}"
-        directions[sym] = "up" if (sc or 0) > 0.5 else "down" if (sc or 0) < -0.5 else "flat"
+# ---- the feed: the only thing that reruns ---------------------------------
+@st.fragment(run_every=REFRESH_SECONDS)
+def _feed():
+    """Push fresh state into the dashboard iframe without rebuilding it.
 
-    # Real markup verified live against the deployed app (Streamlit 1.62):
-    # each option is <label data-testid="stRadioOption" data-selected="true|false">,
-    # NOT data-baseweb="radio" (that was a guess from an older version and
-    # silently didn't match anything -- confirmed by inspecting the live DOM
-    # before shipping this). The native input sits in a visually-hidden
-    # <span>; the circle indicator AND the label text share one wrapper div
-    # (<div><div>circle</div><div data-testid="stMarkdownContainer">text</div></div>),
-    # so hiding the circle needs one more level of nesting than hiding the
-    # whole wrapper -- also caught by checking the live DOM, not guessed.
-    dir_css = "\n".join(
-        f'div[data-testid="stRadio"] label[data-testid="stRadioOption"]:nth-of-type({i}) '
-        f'{{ --box-accent: {"#3fb950" if directions[opt]=="up" else "#f85149" if directions[opt]=="down" else "#8b949e"}; }}'
-        for i, opt in enumerate(options, start=1)
-    )
-    st.markdown(f"""
-    <style>
-      div[data-testid="stRadio"] > div {{ gap: 6px; flex-wrap: wrap; }}
-      div[data-testid="stRadio"] label[data-testid="stRadioOption"] {{
-        background: #161b22; border: 1px solid #30363d; border-radius: 8px;
-        padding: 6px 14px; margin: 0 !important; transition: border-color .15s;
+    Rendered 1px tall -- there is nothing to look at. On a fragment rerun
+    only this iframe is replaced, so its <script> runs again with new data
+    while the dashboard's document, and everything the reader was doing in
+    it, stays exactly as it was.
+    """
+    try:
+        data = _load(src)
+    except Exception as e:                                # noqa: BLE001
+        # A failed poll is not worth tearing the page down for: the dashboard
+        # keeps showing the last good state and marks itself stale on its own.
+        st.iframe(f"<script>console.warn('viewer: state fetch failed: "
+                  f"{type(e).__name__}');</script>", height=1)
+        return
+
+    st.iframe(f"""<script>
+// Hand the new state to the dashboard. st.iframe embeds HTML same-origin
+// with the app page (its own docs say so), so this reach-across is allowed.
+// The dashboard is identified by the function it exposes rather than by
+// position, because Streamlit decides the DOM order, not us.
+(function(){{
+  const payload = {_js_payload(data)};
+  let tries = 0;
+  (function push(){{
+    try{{
+      for(const f of window.parent.document.querySelectorAll('iframe')){{
+        const w = f.contentWindow;
+        if(w && typeof w.applyState === 'function'){{ w.applyState(payload); return; }}
       }}
-      div[data-testid="stRadio"] label[data-testid="stRadioOption"] > div > div:first-child {{ display: none; }}
-      div[data-testid="stRadio"] label[data-testid="stRadioOption"] div[data-testid="stMarkdownContainer"] p {{
-        color: #8b949e; font: 13px/1.2 -apple-system,Segoe UI,Roboto,sans-serif;
-      }}
-      div[data-testid="stRadio"] label[data-testid="stRadioOption"][data-selected="true"] {{
-        border-color: #58a6ff; background: #1c2430;
-      }}
-      div[data-testid="stRadio"] label[data-testid="stRadioOption"][data-selected="true"] div[data-testid="stMarkdownContainer"] p {{
-        color: #e6edf3;
-      }}
-      div[data-testid="stRadio"] label[data-testid="stRadioOption"] {{ border-left: 3px solid var(--box-accent, #30363d); }}
-      {dir_css}
-    </style>
-    """, unsafe_allow_html=True)
+    }}catch(e){{ /* dashboard not up yet */ }}
+    if(++tries < 40) setTimeout(push, 250);        // ~10s of grace on first load
+  }})();
+}})();
+</script>""", height=1)
 
-    choice = st.radio("Ticker", options, format_func=lambda o: labels.get(o, o),
-                       horizontal=True, key="selected_ticker", label_visibility="collapsed")
-    selected = None if choice == "ALL" else choice
 
-# JSON is valid JS, except a literal "</script>" inside a string would close
-# the tag early -- escape it before inlining.
-payload_js = json.dumps(data).replace("</", "<\\/")
-selected_js = json.dumps(selected)   # None -> "null", "SPX" -> '"SPX"'
-html = template.replace("__PAYLOAD__", payload_js).replace("__SELECTED__", selected_js)
-
-st.caption(f"Last scanner update: {data.get('ts', '?')} CT  |  page refreshed {time.strftime('%H:%M:%S')}")
-st.components.v1.html(html, height=2400, scrolling=True)
+_feed()

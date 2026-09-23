@@ -19,13 +19,25 @@ reads a public, read-only JSON snapshot.
    ```
    DRIVE_STATE_URL = "https://drive.google.com/uc?export=download&id=AbCdEf1234..."
    ```
-5. Save. No redeploy needed -- the app picks up the secret on its next run
-   (within the 15s autorefresh).
+5. Save. No redeploy needed -- the app picks up the secret within 15 seconds.
 
-## How it stays "live"
+## How it stays "live" without rebuilding the page
 
-`streamlit_autorefresh` reruns the page every 15 seconds. Each rerun re-fetches
-the Drive file and re-renders `dashboard_template.html` (a copy of the local
-scanner dashboard's own chart code, unmodified) with the fresh data injected
-in. No chart logic lives twice -- if the local dashboard changes, resync this
-copy from `dashboard.html` in the main scanner repo.
+The dashboard (`dashboard_template.html`, a copy of the local scanner
+dashboard's own chart code) is rendered **once**. It is never re-rendered.
+
+A separate 1px iframe inside `@st.fragment(run_every=15)` does the
+refreshing: a fragment rerun re-executes only that fragment, so every 15s the
+tiny feed is rebuilt, re-fetches the Drive file, and calls `applyState(data)`
+on the dashboard iframe (same origin, so it can). The numbers change in place
+and the document is never destroyed -- scroll position, the open ticker and
+expanded rows all survive.
+
+This replaced `st_autorefresh`, which reran the whole script and rebuilt the
+dashboard's iframe from scratch every 15 seconds, throwing away whatever you
+were looking at. That is a known Streamlit limitation with no official fix
+(streamlit/streamlit#9002), not something a component can opt out of.
+
+No chart logic lives twice -- if the local dashboard changes, resync this copy
+from `dashboard.html` in the main scanner repo (one swap: the `fetch('/state')`
+polling tail becomes the `applyState` entry point).
