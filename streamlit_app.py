@@ -167,3 +167,34 @@ def _feed():
 
 
 _feed()
+
+
+# ---- the Pine script, with a copy button ----------------------------------
+@st.fragment
+def _pine():
+    """Show the TradingView overlay the scanner builds each cycle.
+
+    Deliberately NOT on a timer. This is a copy-and-paste target, and an
+    expander that re-renders on its own schedule would collapse or shift under
+    the cursor mid-copy. It refreshes when the button is pressed -- and being
+    a fragment, that button reruns only this block, so the dashboard iframe
+    above is untouched.
+
+    st.code supplies the copy button itself.
+    """
+    try:
+        data = _load(src)
+    except Exception:                                     # noqa: BLE001
+        return
+    pine = (data.get("pine") or {}).get("SPX")
+    if not pine:
+        return                                            # scanner is older, or it failed
+    with st.expander(f"TradingView Pine overlay — levels as of {data.get('ts', '?')} CT"):
+        st.caption("Copy, then paste over the script in TradingView's Pine Editor. "
+                   "Rebuilt by the scanner every cycle.")
+        if st.button("Rebuild from the latest cycle", key="pine_refresh"):
+            st.rerun(scope="fragment")
+        st.code(pine, language=None)
+
+
+_pine()
