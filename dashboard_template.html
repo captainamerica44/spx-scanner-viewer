@@ -144,6 +144,12 @@
   .gcard .gc-row b{color:var(--txt);font-weight:600;font-variant-numeric:tabular-nums}
   .gcard .gc-lean.up b{color:var(--bull)} .gcard .gc-lean.down b{color:var(--bear)}
   .gcard .gc-gsvg{width:110px;height:auto;display:block;margin:2px 0}
+  .support{text-align:center;padding:26px 12px 8px;margin-top:8px;border-top:1px solid var(--line)}
+  .support a{display:inline-block;background:#ffdd00;color:#000;font-weight:600;
+    padding:9px 20px;border-radius:8px;text-decoration:none;font-size:13px}
+  .support .s1{margin-top:12px;font-size:13px;line-height:1.65;color:var(--dim)}
+  .support .s1 b{color:var(--txt)}
+  .support .s2{margin-top:8px;font-size:12px;color:var(--dim);opacity:.72}
 </style>
 </head>
 <body>
@@ -266,6 +272,16 @@
     </table></div>
   </div>
   </div><!-- /deepview -->
+
+  <!-- Inside .wrap deliberately: fitFrame() measures .wrap, so anything hung
+       outside it is not counted and gets clipped by the frame. Being the last
+       child of .wrap also means it trails whichever view is on screen -- the
+       all-tickers grid and every single-ticker view alike. -->
+  <div class="support">
+    <a href="https://buymeacoffee.com/deepchartlabs" target="_blank" rel="noopener">&#9749;&nbsp;Support the creator</a>
+    <div class="s1">Built and run by <b>Deep Chart Labs</b>. If this helps you, a coffee is appreciated &mdash; and if it doesn't, no hard feelings.</div>
+    <div class="s2">Options flow and derived gamma levels, published as data. Nothing here is advice or a recommendation to trade.</div>
+  </div>
 </div>
 
 <script>

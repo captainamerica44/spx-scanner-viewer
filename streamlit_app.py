@@ -201,24 +201,6 @@ _pine()
 
 
 # ---- footer -----------------------------------------------------------------
-# Rendered once, below everything, outside any fragment: it never changes, so
-# there is nothing for a rerun to do and nothing to shift under a cursor.
-st.markdown("""
-<div style="text-align:center;padding:22px 12px 32px;
-            font:13px/1.65 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
-            color:#8b949e">
-  <a href="https://buymeacoffee.com/deepchartlabs" target="_blank" rel="noopener"
-     style="display:inline-block;background:#ffdd00;color:#000;font-weight:600;
-            padding:9px 20px;border-radius:8px;text-decoration:none">
-    &#9749;&nbsp; Support the creator
-  </a>
-  <div style="margin-top:12px">
-    Built and run by <b style="color:#c9d1d9">Deep Chart Labs</b>.
-    If this helps you, a coffee is appreciated &mdash; and if it doesn't, no hard feelings.
-  </div>
-  <div style="margin-top:8px;font-size:12px;opacity:.72">
-    Options flow and derived gamma levels, published as data.
-    Nothing here is advice or a recommendation to trade.
-  </div>
-</div>
-""", unsafe_allow_html=True)
+# Lives in dashboard_template.html now, as the last child of .wrap, so it
+# trails every ticker view and the grid rather than sitting once at the very
+# bottom of the Streamlit page below the Pine box (asked for 2026-09-27).
